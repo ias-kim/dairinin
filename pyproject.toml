@@ -1,0 +1,33 @@
+[project]
+name = "dairinin"
+version = "0.1.0"
+description = "代理人 — Personal Schedule Multi-Agent System (FastMCP + LangGraph + mem0)"
+requires-python = ">=3.12"
+dependencies = [
+    # Week 1: Core
+    "fastmcp>=2.0",
+    "langgraph>=0.4",
+    "langchain-openai>=0.3",
+    "langgraph-checkpoint-postgres>=2.0",
+    "google-auth>=2.0",
+    "google-auth-oauthlib>=1.0",
+    "google-api-python-client>=2.0",
+    "fastapi>=0.115",
+    "uvicorn>=0.34",
+    "psycopg[binary]>=3.0",
+    "python-dotenv>=1.0",
+    # Week 2: Memory
+    "mem0ai>=0.1",
+    # Week 2-3: Slack
+    "slack-sdk>=3.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
