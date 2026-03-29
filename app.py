@@ -149,3 +149,72 @@ app = FastAPI(title="dairinin (代理人)", lifespan=lifespan)
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "dairinin"}
+
+
+# ──────────────────────────────────────────────
+# Slack Events API webhook — HITL 반응 수신
+# ──────────────────────────────────────────────
+
+@app.post("/webhook/slack")
+async def slack_webhook(request: dict):
+    """Slack Events API webhook 수신.
+
+    Slack에서 ✅ (white_check_mark) 또는 ❌ (x) reaction이
+    오면 LangGraph를 resume.
+
+    Slack Events API 요구사항:
+        1. URL verification: {"type": "url_verification"} → challenge 반환
+        2. Event callback: {"type": "event_callback"} → reaction 처리
+    """
+    from fastapi.responses import JSONResponse
+
+    # URL verification (Slack 앱 설정 시 1회)
+    if request.get("type") == "url_verification":
+        return JSONResponse({"challenge": request.get("challenge", "")})
+
+    # Event callback
+    if request.get("type") == "event_callback":
+        event = request.get("event", {})
+
+        # reaction_added 이벤트만 처리
+        if event.get("type") == "reaction_added":
+            reaction = event.get("reaction", "")
+            message_ts = event.get("item", {}).get("ts", "")
+
+            if reaction in ("white_check_mark", "heavy_check_mark"):
+                _resume_hitl(message_ts, "approve")
+            elif reaction == "x":
+                _resume_hitl(message_ts, "reject")
+
+    return {"ok": True}
+
+
+def _resume_hitl(slack_ts: str, decision: str):
+    """HITL 그래프를 resume.
+
+    slack_ts로 thread_id를 찾고, LangGraph를 resume.
+    """
+    from agents.notifier import get_hitl_store
+    from langgraph.types import Command
+
+    hitl = get_hitl_store()
+    mapping = hitl.lookup_by_slack_ts(slack_ts)
+
+    if not mapping:
+        logger.warning(f"No HITL mapping for slack_ts={slack_ts}")
+        return
+
+    thread_id = mapping["thread_id"]
+    email_id = mapping["email_id"]
+
+    logger.info(f"HITL resume: {decision} for email_id={email_id}")
+
+    try:
+        graph = build_graph()
+        graph.invoke(
+            Command(resume=decision),
+            config={"configurable": {"thread_id": thread_id}},
+        )
+        hitl.remove(slack_ts)
+    except Exception as e:
+        logger.error(f"HITL resume failed: {e}")

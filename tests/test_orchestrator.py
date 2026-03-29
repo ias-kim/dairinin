@@ -59,6 +59,8 @@ class TestOrchestrator:
             patch("agents.notifier.create_event_logic") as mock_create,
             patch("agents.notifier.mark_read_logic", return_value=True),
             patch("agents.notifier.get_memory_store", return_value=MagicMock()),
+            patch("agents.notifier.get_hitl_store", return_value=MagicMock()),
+            patch("agents.notifier.interrupt"),  # interrupt를 mock해서 그래프 계속 실행
         ):
             graph = build_graph()
             result = graph.invoke({
@@ -69,8 +71,8 @@ class TestOrchestrator:
             })
 
         assert result["action"] == "hitl_required"
-        assert result["notification"] == "hitl_required"
-        mock_create.assert_not_called()
+        assert result["notification"] == "hitl_resolved"
+        mock_create.assert_not_called()  # resume 없으므로 approve 안 됨
 
     def test_skip_non_event(self):
         """이벤트 아닌 이메일 → skip → mark_read만."""
