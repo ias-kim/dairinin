@@ -60,5 +60,8 @@ class ScheduleState(TypedDict, total=False):
     action: Literal["auto_register", "hitl_required", "skip"]
     proposed_alternative: Optional[datetime]
 
+    # Notifier Agent 출력
+    notification: Optional[str]
+
     # HITL 응답 (Week 2-3에서 추가)
     hitl_response: Optional[str]
