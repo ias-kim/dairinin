@@ -23,12 +23,12 @@ from pathlib import Path
 
 from google_auth_oauthlib.flow import InstalledAppFlow
 
-# Gmail API scope:
-# - gmail.readonly: 이메일 읽기 (fetch_emails)
-# - gmail.modify: 이메일 상태 변경 (mark_read)
+# Gmail + Calendar API scope
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/gmail.modify",
+    "https://www.googleapis.com/auth/calendar.readonly",
+    "https://www.googleapis.com/auth/calendar.events",
 ]
 
 PROJECT_ROOT = Path(__file__).parent.parent
