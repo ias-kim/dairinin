@@ -1,0 +1,151 @@
+"""
+FastAPI 앱 — 폴링 루프 + 전체 파이프라인 통합.
+
+모든 조각을 하나의 프로세스에서 실행:
+    - asyncio background task: 15초마다 Gmail 폴링
+    - FastAPI HTTP: Slack webhook 수신 (Week 2-3)
+
+실행: uvicorn app:app --reload
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+from contextlib import asynccontextmanager
+from typing import Optional
+
+from dotenv import load_dotenv
+from fastapi import FastAPI
+
+from graph.orchestrator import build_graph
+
+load_dotenv()
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
+logger = logging.getLogger("dairinin")
+
+POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "15"))
+
+# 동시 실행 방지 플래그
+_processing = False
+
+
+def process_single_email(email: dict) -> Optional[dict]:
+    """이메일 1건을 LangGraph 파이프라인으로 처리.
+
+    Args:
+        email: {"id", "from", "subject", "snippet"}
+
+    Returns:
+        graph 실행 결과 dict, 실패 시 None
+    """
+    try:
+        graph = build_graph()
+        result = graph.invoke({
+            "email_id": email["id"],
+            "raw_email": email.get("snippet", ""),
+            "subject": email.get("subject", ""),
+            "sender": email.get("from", ""),
+        })
+        return result
+    except Exception as e:
+        logger.error(f"Failed to process email {email['id']}: {e}")
+        return None
+
+
+async def poll_gmail_loop():
+    """15초마다 Gmail을 폴링해서 파이프라인 실행.
+
+    동작:
+        1. fetch_emails로 안 읽은 이메일 가져오기
+        2. 각 이메일에 대해 process_single_email 실행
+        3. confidence 결과에 따라 로그 출력
+           (Week 1: console HITL — Slack 전에 로그로 확인)
+        4. 에러 발생해도 루프 계속
+
+    동시 실행 방지:
+        이전 사이클이 아직 실행 중이면 이번 사이클 스킵.
+        15초 간격인데 LLM 호출이 오래 걸릴 수 있으므로.
+    """
+    global _processing
+
+    while True:
+        try:
+            if _processing:
+                logger.debug("Previous cycle still running, skipping")
+                await asyncio.sleep(POLL_INTERVAL)
+                continue
+
+            _processing = True
+
+            # Gmail에서 안 읽은 이메일 가져오기
+            from mcp_servers.gmail_mcp import build_gmail_service, fetch_emails_logic
+
+            try:
+                service = build_gmail_service()
+                emails = fetch_emails_logic(service)
+            except Exception as e:
+                logger.error(f"Gmail fetch failed: {e}")
+                emails = []
+
+            if emails:
+                logger.info(f"Found {len(emails)} unread emails")
+
+            for email in emails:
+                logger.info(f"Processing: [{email.get('subject')}] from {email.get('from')}")
+
+                result = process_single_email(email)
+
+                if result is None:
+                    logger.warning(f"  → Failed to process {email['id']}")
+                    continue
+
+                confidence = result.get("confidence", 0.0)
+                parsed = result.get("parsed_event")
+
+                if parsed is None:
+                    logger.info(f"  → Not an event, skipping")
+                elif confidence >= 0.8:
+                    # Week 1: 로그만 (DRY_RUN)
+                    logger.info(
+                        f"  → AUTO_REGISTER (confidence={confidence}): "
+                        f"{parsed.title} at {parsed.event_datetime}"
+                    )
+                else:
+                    # Week 1: console HITL (Slack 전)
+                    logger.warning(
+                        f"  → HITL REQUIRED (confidence={confidence}): "
+                        f"{parsed.title} at {parsed.event_datetime}"
+                    )
+
+        except Exception as e:
+            logger.error(f"Poll loop error: {e}")
+
+        finally:
+            _processing = False
+
+        await asyncio.sleep(POLL_INTERVAL)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """FastAPI 라이프사이클.
+
+    앱 시작 시 폴링 루프를 background task로 실행.
+    앱 종료 시 task 취소.
+    """
+    logger.info(f"dairinin starting (poll every {POLL_INTERVAL}s)")
+    task = asyncio.create_task(poll_gmail_loop())
+    yield
+    task.cancel()
+    logger.info("dairinin stopped")
+
+
+app = FastAPI(title="dairinin (代理人)", lifespan=lifespan)
+
+
+@app.get("/health")
+async def health():
+    return {"status": "ok", "service": "dairinin"}
