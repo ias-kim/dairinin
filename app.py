@@ -17,7 +17,7 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 
 from graph.orchestrator import build_graph
 
@@ -151,6 +151,11 @@ async def health():
     return {"status": "ok", "service": "dairinin"}
 
 
+@app.get("/")
+async def root():
+    return {"service": "dairinin (代理人)", "status": "running"}
+
+
 # ──────────────────────────────────────────────
 # Slack Events API webhook — HITL 반응 수신
 # ──────────────────────────────────────────────
@@ -187,6 +192,43 @@ async def slack_webhook(request: dict):
                 _resume_hitl(message_ts, "reject")
 
     return {"ok": True}
+
+
+@app.post("/webhook/slack/interact")
+async def slack_interact(request: Request):
+    """Slack Interactivity webhook — Block Kit 버튼 클릭 수신.
+
+    Slack은 버튼 클릭을 application/x-www-form-urlencoded로 보냄.
+    payload 필드 안에 JSON이 들어있음.
+    """
+    import json as json_mod
+    from fastapi.responses import JSONResponse
+
+    form = await request.form()
+    payload = json_mod.loads(form.get("payload", "{}"))
+
+    actions = payload.get("actions", [])
+    message_ts = payload.get("message", {}).get("ts", "")
+
+    for action in actions:
+        action_id = action.get("action_id", "")
+        value = json_mod.loads(action.get("value", "{}"))
+
+        if action_id == "hitl_approve":
+            _resume_hitl(message_ts, "approve")
+            # 버튼을 "✅ 등록됨"으로 교체
+            return JSONResponse({
+                "replace_original": True,
+                "text": f"✅ 등록 완료: {value.get('email_id', '')}",
+            })
+        elif action_id == "hitl_reject":
+            _resume_hitl(message_ts, "reject")
+            return JSONResponse({
+                "replace_original": True,
+                "text": f"❌ 무시됨: {value.get('email_id', '')}",
+            })
+
+    return JSONResponse({"ok": True})
 
 
 def _resume_hitl(slack_ts: str, decision: str):

@@ -1,12 +1,13 @@
 """
 Slack MCP 서버 — HITL 메시지 전송.
 
-Notifier Agent가 hitl_required일 때 호출.
-사용자에게 이벤트 정보 + ✅/❌ 이모지 안내를 전송.
+Block Kit 버튼으로 ✅등록 / ❌무시 선택.
+이메일 본문 snippet 포함.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from typing import Optional
@@ -32,40 +33,82 @@ def send_hitl_message(
     confidence: float,
     conflicts: list[str],
     email_id: str,
+    sender: str = "",
+    snippet: str = "",
 ) -> Optional[dict]:
-    """HITL 메시지를 Slack 채널에 전송.
-
-    Args:
-        client: Slack WebClient
-        channel: 채널 ID
-        title: 이벤트 제목
-        datetime_str: 일시 문자열
-        confidence: 신뢰도 점수
-        conflicts: 충돌 일정 이름 리스트
-        email_id: Gmail 메시지 ID (webhook에서 매핑용)
+    """HITL 메시지를 Block Kit 버튼과 함께 전송.
 
     Returns:
         {"ok": True, "ts": "...", "channel": "..."} 또는 None
     """
+    # 충돌 텍스트
     conflict_text = ""
     if conflicts:
-        conflict_lines = "\n".join(f"  • {c}" for c in conflicts)
-        conflict_text = f"\n⚠️ 충돌:\n{conflict_lines}"
+        conflict_text = "\n".join(f"• {c}" for c in conflicts)
 
-    text = (
-        f"📅 *일정 확인 요청*\n"
-        f"제목: *{title}*\n"
-        f"일시: {datetime_str}\n"
-        f"신뢰도: {confidence:.0%}"
-        f"{conflict_text}\n\n"
-        f"✅ 등록  |  ❌ 무시\n"
-        f"_email_id: {email_id}_"
-    )
+    # Block Kit 구성
+    blocks = [
+        {
+            "type": "header",
+            "text": {"type": "plain_text", "text": "📅 일정 확인 요청", "emoji": True},
+        },
+        {
+            "type": "section",
+            "fields": [
+                {"type": "mrkdwn", "text": f"*제목*\n{title}"},
+                {"type": "mrkdwn", "text": f"*일시*\n{datetime_str}"},
+                {"type": "mrkdwn", "text": f"*신뢰도*\n{confidence:.0%}"},
+                {"type": "mrkdwn", "text": f"*보낸 사람*\n{sender or '알 수 없음'}"},
+            ],
+        },
+    ]
+
+    # 이메일 본문
+    if snippet:
+        display_snippet = snippet[:300] + ("..." if len(snippet) > 300 else "")
+        blocks.append({
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": f"*이메일 내용*\n```{display_snippet}```"},
+        })
+
+    # 충돌 정보
+    if conflict_text:
+        blocks.append({
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": f"⚠️ *충돌 일정*\n{conflict_text}"},
+        })
+
+    blocks.append({"type": "divider"})
+
+    # 버튼
+    blocks.append({
+        "type": "actions",
+        "elements": [
+            {
+                "type": "button",
+                "text": {"type": "plain_text", "text": "✅ 등록", "emoji": True},
+                "style": "primary",
+                "action_id": "hitl_approve",
+                "value": json.dumps({"email_id": email_id, "action": "approve"}),
+            },
+            {
+                "type": "button",
+                "text": {"type": "plain_text", "text": "❌ 무시", "emoji": True},
+                "style": "danger",
+                "action_id": "hitl_reject",
+                "value": json.dumps({"email_id": email_id, "action": "reject"}),
+            },
+        ],
+    })
+
+    # fallback text (알림용)
+    fallback = f"일정 확인: {title} ({datetime_str}) - 신뢰도 {confidence:.0%}"
 
     try:
         response = client.chat_postMessage(
             channel=channel,
-            text=text,
+            text=fallback,
+            blocks=blocks,
             unfurl_links=False,
         )
         logger.info(f"HITL message sent: {response['ts']}")

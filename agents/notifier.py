@@ -160,6 +160,8 @@ def _handle_hitl(state: ScheduleState):
                 confidence=confidence,
                 conflicts=conflict_names,
                 email_id=email_id,
+                sender=state.get("sender", ""),
+                snippet=state.get("raw_email", ""),
             )
 
             if result and result.get("ts"):
