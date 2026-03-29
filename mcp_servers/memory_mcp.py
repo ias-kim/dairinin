@@ -33,7 +33,11 @@ class MemoryStore:
             threshold = 0.6  (자주 승인하는 패턴 → 완화)
     """
 
-    def __init__(self, use_mem0: bool = False):
+    def __init__(self, use_mem0: bool | None = None):
+        # None이면 환경변수에서 자동 감지
+        if use_mem0 is None:
+            use_mem0 = bool(os.getenv("MEM0_API_URL"))
+
         self._use_mem0 = use_mem0
 
         if use_mem0:
@@ -47,7 +51,7 @@ class MemoryStore:
         try:
             from mem0 import MemoryClient
 
-            api_url = os.getenv("MEM0_API_URL", "http://localhost:8005")
+            api_url = os.getenv("MEM0_API_URL", "http://localhost:8888")
             self._mem0 = MemoryClient(api_key="local", host=api_url)
             logger.info(f"mem0 connected: {api_url}")
         except Exception as e:

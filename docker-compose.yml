@@ -10,5 +10,44 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
 
+  # mem0: pgvector로 임베딩 저장, Neo4j로 엔티티 관계
+  mem0-postgres:
+    image: pgvector/pgvector:pg16
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: mem0
+      POSTGRES_PASSWORD: mem0
+      POSTGRES_DB: mem0
+    volumes:
+      - mem0pgdata:/var/lib/postgresql/data
+
+  mem0-neo4j:
+    image: neo4j:5
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      NEO4J_AUTH: neo4j/mem0password
+    volumes:
+      - mem0neo4j:/data
+
+  mem0:
+    image: mem0/mem0:latest
+    ports:
+      - "8888:8000"
+    depends_on:
+      - mem0-postgres
+      - mem0-neo4j
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - MEM0_STORE_TYPE=postgres
+      - DATABASE_URL=postgresql://mem0:mem0@mem0-postgres:5432/mem0
+      - NEO4J_URL=bolt://mem0-neo4j:7687
+      - NEO4J_USERNAME=neo4j
+      - NEO4J_PASSWORD=mem0password
+
 volumes:
   pgdata:
+  mem0pgdata:
+  mem0neo4j:
