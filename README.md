@@ -10,7 +10,7 @@
 
 ### アーキテクチャ
 
-<!-- 아키텍처 다이어그램 삽입 예정 -->
+![Architecture](docs/LangGraph.drawio.png)
 
 ### 主な機能
 
@@ -67,7 +67,7 @@ uv run pytest -v   # 63件、~9秒
 
 ### 아키텍처
 
-<!-- 아키텍처 다이어그램 삽입 예정 -->
+![Architecture](docs/LangGraph.drawio.png)
 
 ### 주요 기능
 
