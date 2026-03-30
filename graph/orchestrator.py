@@ -54,8 +54,10 @@ def build_graph() -> StateGraph:
     database_url = os.getenv("DATABASE_URL")
     if database_url:
         try:
+            import psycopg
             from langgraph.checkpoint.postgres import PostgresSaver
-            checkpointer = PostgresSaver.from_conn_string(database_url)
+            conn = psycopg.connect(database_url)
+            checkpointer = PostgresSaver(conn)
             checkpointer.setup()
             logger.info("Orchestrator: PostgresSaver connected")
         except Exception as e:
