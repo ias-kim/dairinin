@@ -167,27 +167,21 @@ async def root():
 # ──────────────────────────────────────────────
 
 @app.post("/webhook/slack")
-async def slack_webhook(request: dict):
-    """Slack Events API webhook 수신.
-
-    Slack에서 ✅ (white_check_mark) 또는 ❌ (x) reaction이
-    오면 LangGraph를 resume.
-
-    Slack Events API 요구사항:
-        1. URL verification: {"type": "url_verification"} → challenge 반환
-        2. Event callback: {"type": "event_callback"} → reaction 처리
-    """
+async def slack_webhook(request: Request):
+    """Slack Events API webhook 수신."""
+    import json as json_mod
     from fastapi.responses import JSONResponse
 
+    body = await request.json()
+
     # URL verification (Slack 앱 설정 시 1회)
-    if request.get("type") == "url_verification":
-        return JSONResponse({"challenge": request.get("challenge", "")})
+    if body.get("type") == "url_verification":
+        return JSONResponse({"challenge": body.get("challenge", "")})
 
     # Event callback
-    if request.get("type") == "event_callback":
-        event = request.get("event", {})
+    if body.get("type") == "event_callback":
+        event = body.get("event", {})
 
-        # reaction_added 이벤트만 처리
         if event.get("type") == "reaction_added":
             reaction = event.get("reaction", "")
             message_ts = event.get("item", {}).get("ts", "")
