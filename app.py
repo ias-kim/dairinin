@@ -41,14 +41,20 @@ def process_single_email(email: dict) -> Optional[dict]:
     Returns:
         graph 실행 결과 dict, 실패 시 None
     """
+    import uuid
+
     try:
+        thread_id = str(uuid.uuid4())
         graph = build_graph()
-        result = graph.invoke({
-            "email_id": email["id"],
-            "raw_email": email.get("snippet", ""),
-            "subject": email.get("subject", ""),
-            "sender": email.get("from", ""),
-        })
+        result = graph.invoke(
+            {
+                "email_id": email["id"],
+                "raw_email": email.get("snippet", ""),
+                "subject": email.get("subject", ""),
+                "sender": email.get("from", ""),
+            },
+            config={"configurable": {"thread_id": thread_id}},
+        )
         return result
     except Exception as e:
         logger.error(f"Failed to process email {email['id']}: {e}")

@@ -8,6 +8,9 @@ LangGraph Orchestrator — 에이전트 노드를 그래프로 연결.
 
 from __future__ import annotations
 
+import os
+
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 
 from agents.conflict import conflict_decision_node
@@ -45,4 +48,15 @@ def build_graph() -> StateGraph:
     graph.add_edge("conflict", "notifier")
     graph.add_edge("notifier", END)
 
-    return graph.compile()
+    database_url = os.getenv("DATABASE_URL")
+    if database_url:
+        try:
+            from langgraph.checkpoint.postgres import PostgresSaver
+            checkpointer = PostgresSaver.from_conn_string(database_url)
+            checkpointer.setup()
+        except Exception:
+            checkpointer = MemorySaver()
+    else:
+        checkpointer = MemorySaver()
+
+    return graph.compile(checkpointer=checkpointer)

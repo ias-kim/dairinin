@@ -1,4 +1,6 @@
 .env
+.env.prod
+.env.dev
 token.json
 __pycache__/
 *.pyc

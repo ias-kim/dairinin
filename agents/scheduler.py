@@ -11,7 +11,7 @@ import logging
 from datetime import timedelta, timezone
 
 from graph.state import ScheduleState
-from mcp_servers.calendar_mcp import check_conflicts_logic, get_events_logic
+from mcp_servers.calendar_mcp import build_calendar_service, check_conflicts_logic, get_events_logic
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,8 @@ def schedule_check_node(state: ScheduleState) -> dict:
     end_str = end_dt.isoformat()
 
     try:
-        existing = get_events_logic(None, date_str)  # service=None → mock에서 처리
+        service = build_calendar_service()
+        existing = get_events_logic(service, date_str)
         conflicts = check_conflicts_logic(existing, start_str, end_str)
     except Exception as e:
         logger.error(f"Schedule check failed: {e}")

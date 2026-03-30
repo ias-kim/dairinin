@@ -23,6 +23,7 @@ class TestNotifierAutoRegister:
             patch("agents.notifier.create_event_logic", return_value={"status": "dry_run", "summary": "팀 미팅"}),
             patch("agents.notifier.mark_read_logic", return_value=True),
             patch("agents.notifier.get_memory_store", return_value=MagicMock()),
+            patch("agents.notifier.get_hitl_store", return_value=MagicMock()),
         ):
             result = notify_node({
                 "email_id": "msg_1",
@@ -42,6 +43,7 @@ class TestNotifierAutoRegister:
             patch("agents.notifier.create_event_logic", return_value={"status": "dry_run"}),
             patch("agents.notifier.mark_read_logic"),
             patch("agents.notifier.get_memory_store") as mock_mem,
+            patch("agents.notifier.get_hitl_store", return_value=MagicMock()),
         ):
             mock_store = MagicMock()
             mock_mem.return_value = mock_store
@@ -64,6 +66,7 @@ class TestNotifierAutoRegister:
             patch("agents.notifier.create_event_logic", return_value={"status": "error", "error": "403"}),
             patch("agents.notifier.mark_read_logic") as mock_mark,
             patch("agents.notifier.get_memory_store", return_value=MagicMock()),
+            patch("agents.notifier.get_hitl_store", return_value=MagicMock()),
         ):
             notify_node({
                 "email_id": "msg_3",
@@ -135,6 +138,7 @@ class TestNotifierSkip:
             patch("agents.notifier.create_event_logic") as mock_create,
             patch("agents.notifier.mark_read_logic") as mock_mark,
             patch("agents.notifier.get_memory_store"),
+            patch("agents.notifier.get_hitl_store", return_value=MagicMock()),
         ):
             mock_mark.return_value = True
             result = notify_node({

@@ -28,12 +28,15 @@ class TestOrchestrator:
             patch("agents.notifier.get_memory_store", return_value=MagicMock()),
         ):
             graph = build_graph()
-            result = graph.invoke({
-                "email_id": "msg_1",
-                "raw_email": "Daily standup at 10am",
-                "subject": "Standup",
-                "sender": "team@example.com",
-            })
+            result = graph.invoke(
+                {
+                    "email_id": "msg_1",
+                    "raw_email": "Daily standup at 10am",
+                    "subject": "Standup",
+                    "sender": "team@example.com",
+                },
+                config={"configurable": {"thread_id": "test-thread-1"}},
+            )
 
         assert result["action"] == "auto_register"
         assert result["notification"] == "auto_register"
@@ -63,12 +66,15 @@ class TestOrchestrator:
             patch("agents.notifier.interrupt"),  # interrupt를 mock해서 그래프 계속 실행
         ):
             graph = build_graph()
-            result = graph.invoke({
-                "email_id": "msg_2",
-                "raw_email": "Let's meet at 2pm",
-                "subject": "Meeting",
-                "sender": "kim@example.com",
-            })
+            result = graph.invoke(
+                {
+                    "email_id": "msg_2",
+                    "raw_email": "Let's meet at 2pm",
+                    "subject": "Meeting",
+                    "sender": "kim@example.com",
+                },
+                config={"configurable": {"thread_id": "test-thread-2"}},
+            )
 
         assert result["action"] == "hitl_required"
         assert result["notification"] == "hitl_resolved"
@@ -83,12 +89,15 @@ class TestOrchestrator:
             patch("agents.notifier.get_memory_store", return_value=MagicMock()),
         ):
             graph = build_graph()
-            result = graph.invoke({
-                "email_id": "msg_3",
-                "raw_email": "Here is the report",
-                "subject": "Report",
-                "sender": "boss@example.com",
-            })
+            result = graph.invoke(
+                {
+                    "email_id": "msg_3",
+                    "raw_email": "Here is the report",
+                    "subject": "Report",
+                    "sender": "boss@example.com",
+                },
+                config={"configurable": {"thread_id": "test-thread-3"}},
+            )
 
         assert result["notification"] == "skip"
         mock_create.assert_not_called()
