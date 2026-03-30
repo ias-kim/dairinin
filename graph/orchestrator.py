@@ -8,9 +8,12 @@ LangGraph Orchestrator — 에이전트 노드를 그래프로 연결.
 
 from __future__ import annotations
 
+import logging
 import os
 
 from langgraph.checkpoint.memory import MemorySaver
+
+logger = logging.getLogger(__name__)
 from langgraph.graph import END, StateGraph
 
 from agents.conflict import conflict_decision_node
@@ -54,9 +57,12 @@ def build_graph() -> StateGraph:
             from langgraph.checkpoint.postgres import PostgresSaver
             checkpointer = PostgresSaver.from_conn_string(database_url)
             checkpointer.setup()
-        except Exception:
+            logger.info("Orchestrator: PostgresSaver connected")
+        except Exception as e:
+            logger.warning(f"Orchestrator: PostgresSaver failed, fallback to MemorySaver: {e}")
             checkpointer = MemorySaver()
     else:
+        logger.info("Orchestrator: MemorySaver (no DATABASE_URL)")
         checkpointer = MemorySaver()
 
     return graph.compile(checkpointer=checkpointer)
