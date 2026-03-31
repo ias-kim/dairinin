@@ -7,6 +7,7 @@ Conflict Agent — confidence + conflicts로 최종 action 결정.
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 
 from graph.state import ScheduleState
 
@@ -20,9 +21,11 @@ def conflict_decision_node(state: ScheduleState) -> dict:
 
     판단 로직:
         1. parsed_event 없음 → skip
-        2. confidence < 0.8 → hitl_required
-        3. 충돌 있음 → hitl_required
-        4. 나머지 → auto_register
+        2. event_datetime 없음 → skip
+        3. event_datetime이 과거 → skip (mem0 학습은 notifier에서 처리)
+        4. confidence < 0.8 → hitl_required
+        5. 충돌 있음 → hitl_required
+        6. 나머지 → auto_register
     """
     parsed = state.get("parsed_event")
 
@@ -31,6 +34,14 @@ def conflict_decision_node(state: ScheduleState) -> dict:
 
     if not parsed.event_datetime:
         logger.info(f"Skip: no event_datetime for '{parsed.title}'")
+        return {"action": "skip"}
+
+    now = datetime.now(timezone.utc)
+    event_dt = parsed.event_datetime
+    if event_dt.tzinfo is None:
+        event_dt = event_dt.replace(tzinfo=timezone.utc)
+    if event_dt < now:
+        logger.info(f"Skip: past event '{parsed.title}' at {parsed.event_datetime}")
         return {"action": "skip"}
 
     confidence = state.get("confidence", 0.0)

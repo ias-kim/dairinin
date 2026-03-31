@@ -4,7 +4,7 @@ Conflict Agent 테스트.
 confidence + conflicts로 최종 action 결정.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from utils.models import EventJSON
 
@@ -66,6 +66,36 @@ class TestConflictAgent:
         result = conflict_decision_node({
             "parsed_event": None,
             "confidence": 0.0,
+            "conflicts": [],
+        })
+
+        assert result["action"] == "skip"
+
+    def test_skip_when_past_event(self):
+        """event_datetime이 과거 → skip (캘린더 등록 불필요)."""
+        from agents.conflict import conflict_decision_node
+
+        result = conflict_decision_node({
+            "parsed_event": EventJSON(
+                title="지난 미팅",
+                event_datetime=datetime(2024, 3, 16, 15, 0, tzinfo=timezone.utc),
+            ),
+            "confidence": 0.95,
+            "conflicts": [],
+        })
+
+        assert result["action"] == "skip"
+
+    def test_skip_when_past_event_naive_datetime(self):
+        """timezone 없는 과거 datetime도 → skip."""
+        from agents.conflict import conflict_decision_node
+
+        result = conflict_decision_node({
+            "parsed_event": EventJSON(
+                title="옛날 설명회",
+                event_datetime=datetime(2024, 1, 1, 10, 0),
+            ),
+            "confidence": 0.9,
             "conflicts": [],
         })
 
