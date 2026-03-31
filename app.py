@@ -157,6 +157,46 @@ async def health():
     return {"status": "ok", "service": "dairinin"}
 
 
+@app.get("/health/db")
+async def health_db():
+    """DB 연결 상태 확인.
+
+    DATABASE_URL 환경변수로 PostgreSQL에 접속해 SELECT 1을 실행.
+    연결 성공 시 {"status": "ok", "database": "connected"},
+    실패 시 {"status": "error", "database": "disconnected", "error": "..."}.
+    """
+    import psycopg
+    from fastapi.responses import JSONResponse
+
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "error",
+                "database": "disconnected",
+                "error": "DATABASE_URL environment variable is not set",
+            },
+        )
+
+    try:
+        with psycopg.connect(database_url, connect_timeout=5) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+                cur.fetchone()
+        return {"status": "ok", "database": "connected"}
+    except Exception as e:
+        logger.warning(f"DB health check failed: {e}")
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "error",
+                "database": "disconnected",
+                "error": str(e),
+            },
+        )
+
+
 @app.get("/")
 async def root():
     return {"service": "dairinin (代理人)", "status": "running"}
