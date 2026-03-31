@@ -154,7 +154,18 @@ app = FastAPI(title="dairinin (代理人)", lifespan=lifespan)
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "dairinin"}
+    import os
+    db_status = "disconnected"
+    database_url = os.getenv("DATABASE_URL")
+    if database_url:
+        try:
+            import psycopg
+            conn = psycopg.connect(database_url)
+            conn.close()
+            db_status = "connected"
+        except Exception as e:
+            db_status = f"error: {e}"
+    return {"status": "ok", "service": "dairinin", "db": db_status}
 
 
 @app.get("/")
