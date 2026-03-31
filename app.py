@@ -78,6 +78,7 @@ async def poll_gmail_loop():
     global _processing
 
     while True:
+        await asyncio.sleep(10)
         try:
             if _processing:
                 logger.debug("Previous cycle still running, skipping")
