@@ -56,7 +56,7 @@ def build_graph() -> StateGraph:
         try:
             import psycopg
             from langgraph.checkpoint.postgres import PostgresSaver
-            conn = psycopg.connect(database_url)
+            conn = psycopg.connect(database_url, autocommit=True)
             checkpointer = PostgresSaver(conn)
             checkpointer.setup()
             logger.info("Orchestrator: PostgresSaver connected")

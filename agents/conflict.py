@@ -29,6 +29,10 @@ def conflict_decision_node(state: ScheduleState) -> dict:
     if not parsed:
         return {"action": "skip"}
 
+    if not parsed.event_datetime:
+        logger.info(f"Skip: no event_datetime for '{parsed.title}'")
+        return {"action": "skip"}
+
     confidence = state.get("confidence", 0.0)
     conflicts = state.get("conflicts", [])
 

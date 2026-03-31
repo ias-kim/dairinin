@@ -40,12 +40,24 @@ class TestConflictAgent:
         from agents.conflict import conflict_decision_node
 
         result = conflict_decision_node({
-            "parsed_event": EventJSON(title="뭔가"),
+            "parsed_event": EventJSON(title="뭔가", event_datetime=datetime(2026, 4, 1, 10, 0)),
             "confidence": 0.5,
             "conflicts": [],
         })
 
         assert result["action"] == "hitl_required"
+
+    def test_skip_when_no_event_datetime(self):
+        """event_datetime 없으면 → skip (Slack 올려봤자 등록 불가)."""
+        from agents.conflict import conflict_decision_node
+
+        result = conflict_decision_node({
+            "parsed_event": EventJSON(title="설명회 안내"),
+            "confidence": 0.7,
+            "conflicts": [],
+        })
+
+        assert result["action"] == "skip"
 
     def test_skip_when_no_event(self):
         """parsed_event 없으면 → skip."""
