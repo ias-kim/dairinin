@@ -12,6 +12,103 @@
 
 ![Architecture](docs/LangGraph.drawio.png)
 
+### 処理フロー
+
+```mermaid
+sequenceDiagram
+    participant Gmail
+    participant App as App (FastAPI)
+    participant Detector as EventDetector
+    participant Parser as Parser Agent<br/>(GPT-4o)
+    participant Scheduler as Scheduler Agent<br/>(Google Calendar)
+    participant Conflict as Conflict Agent
+    participant Notifier as Notifier Agent
+    participant Slack
+    participant User as 人間 (User)
+    participant Calendar as Google Calendar
+    participant Memory as mem0<br/>(Memory)
+    participant DB as PostgreSQL<br/>(Checkpoint)
+
+    Note over App,Gmail: 1. メール受信 (15秒ポーリング)
+
+    App->>Gmail: fetch_emails() — 未読メール取得
+    Gmail-->>App: [{id, subject, from, snippet}]
+
+    Note over App,Detector: 2. 前処理フィルター (LLMコスト削減)
+
+    App->>Detector: should_process_email(text)
+    Detector->>Detector: 1段階: 日付/時刻/キーワード regex
+    alt キーワードなし
+        Detector-->>App: False → skip
+    end
+    Detector->>Detector: 2段階: LLM yes/no (gpt-4o-mini)
+    Detector-->>App: True / False
+
+    Note over App,DB: 3. LangGraphパイプライン開始
+
+    App->>DB: thread_id生成 + checkpoint初期化
+    App->>Parser: parse_email_node(email)
+
+    Parser->>Memory: 過去パターン照会 (mem0)
+    Memory-->>Parser: 類似メール処理履歴
+    Parser->>Parser: GPT-4oでイベント抽出<br/>(title, datetime, location)
+    Parser->>Parser: confidence計算 (ルールベース)
+    Parser-->>DB: 状態保存 (parsed_event, confidence)
+
+    Note over Parser,Conflict: 4. スケジュール衝突確認
+
+    Parser->>Scheduler: schedule_check_node()
+    Scheduler->>Calendar: 該当時間帯の既存予定照会
+    Calendar-->>Scheduler: conflicts[]
+    Scheduler-->>DB: 状態保存 (conflicts)
+
+    Scheduler->>Conflict: conflict_decision_node()
+
+    alt event_datetime なし
+        Conflict-->>Notifier: action = skip
+    else confidence < 0.8 OR 衝突あり
+        Conflict-->>Notifier: action = hitl_required
+    else confidence ≥ 0.8 AND 衝突なし
+        Conflict-->>Notifier: action = auto_register
+    end
+
+    Note over Notifier,Calendar: 5a. 自動登録パス
+
+    alt action = auto_register
+        Notifier->>Calendar: create_event(title, datetime, location)
+        Calendar-->>Notifier: event_id
+        Notifier->>Memory: 成功パターン保存 (mem0)
+        Notifier-->>DB: 完了 checkpoint
+    end
+
+    Note over Notifier,User: 5b. 人間確認パス (HITL)
+
+    alt action = hitl_required
+        Notifier->>Slack: send_hitl_message()<br/>confidence, 衝突情報, ボタン付き
+        Slack-->>User: 📩 予定確認依頼 [✅ 登録] [❌ 無視]
+        Notifier->>DB: interrupt() — グラフ一時停止
+
+        User->>Slack: ボタンクリック (approve / reject)
+        Slack->>App: POST /webhook/slack/interact
+
+        App->>DB: slack_ts → thread_id照会 (HitlStore)
+        App->>DB: Command(resume=approve/reject)
+
+        alt approve
+            DB->>Calendar: create_event() — グラフ再開
+            Calendar-->>DB: event_id
+            DB->>Memory: HITL承認パターン保存
+            DB->>Slack: ✅ 登録完了メッセージに置換
+        else reject
+            DB->>Memory: 却下パターン保存
+            DB->>Slack: ❌ 無視されましたメッセージに置換
+        end
+    end
+
+    Note over Memory,Calendar: 6. 学習 → 次サイクルに反映
+    Memory->>Parser: 次回類似メール処理時にパターン参照
+```
+
 ### 主な機能
 
 | 機能 | 説明 |
@@ -68,6 +165,103 @@ uv run pytest -v   # 63件、~9秒
 ### 아키텍처
 
 ![Architecture](docs/LangGraph.drawio.png)
+
+### 처리 흐름
+
+```mermaid
+sequenceDiagram
+    participant Gmail
+    participant App as App (FastAPI)
+    participant Detector as EventDetector
+    participant Parser as Parser Agent<br/>(GPT-4o)
+    participant Scheduler as Scheduler Agent<br/>(Google Calendar)
+    participant Conflict as Conflict Agent
+    participant Notifier as Notifier Agent
+    participant Slack
+    participant User as 사람 (User)
+    participant Calendar as Google Calendar
+    participant Memory as mem0<br/>(Memory)
+    participant DB as PostgreSQL<br/>(Checkpoint)
+
+    Note over App,Gmail: 1. 이메일 수신 (15초 폴링)
+
+    App->>Gmail: fetch_emails() — 안 읽은 메일 조회
+    Gmail-->>App: [{id, subject, from, snippet}]
+
+    Note over App,Detector: 2. 전처리 필터 (LLM 절약)
+
+    App->>Detector: should_process_email(text)
+    Detector->>Detector: 1차: 날짜/시간/키워드 regex
+    alt 키워드 없음
+        Detector-->>App: False → skip
+    end
+    Detector->>Detector: 2차: LLM yes/no (gpt-4o-mini)
+    Detector-->>App: True / False
+
+    Note over App,DB: 3. LangGraph 파이프라인 시작
+
+    App->>DB: thread_id 생성 + checkpoint 초기화
+    App->>Parser: parse_email_node(email)
+
+    Parser->>Memory: 과거 패턴 조회 (mem0)
+    Memory-->>Parser: 유사 이메일 처리 이력
+    Parser->>Parser: GPT-4o로 이벤트 추출<br/>(title, datetime, location)
+    Parser->>Parser: confidence 계산 (규칙 기반)
+    Parser-->>DB: 상태 저장 (parsed_event, confidence)
+
+    Note over Parser,Conflict: 4. 일정 충돌 확인
+
+    Parser->>Scheduler: schedule_check_node()
+    Scheduler->>Calendar: 해당 시간대 기존 일정 조회
+    Calendar-->>Scheduler: conflicts[]
+    Scheduler-->>DB: 상태 저장 (conflicts)
+
+    Scheduler->>Conflict: conflict_decision_node()
+
+    alt event_datetime 없음
+        Conflict-->>Notifier: action = skip
+    else confidence < 0.8 OR 충돌 있음
+        Conflict-->>Notifier: action = hitl_required
+    else confidence ≥ 0.8 AND 충돌 없음
+        Conflict-->>Notifier: action = auto_register
+    end
+
+    Note over Notifier,Calendar: 5a. 자동 등록 경로
+
+    alt action = auto_register
+        Notifier->>Calendar: create_event(title, datetime, location)
+        Calendar-->>Notifier: event_id
+        Notifier->>Memory: 성공 패턴 저장 (mem0)
+        Notifier-->>DB: 완료 checkpoint
+    end
+
+    Note over Notifier,User: 5b. 사람 확인 경로 (HITL)
+
+    alt action = hitl_required
+        Notifier->>Slack: send_hitl_message()<br/>confidence, 충돌 정보, 버튼 포함
+        Slack-->>User: 📩 일정 확인 요청 [✅ 등록] [❌ 무시]
+        Notifier->>DB: interrupt() — 그래프 일시 정지
+
+        User->>Slack: 버튼 클릭 (approve / reject)
+        Slack->>App: POST /webhook/slack/interact
+
+        App->>DB: slack_ts → thread_id 조회 (HitlStore)
+        App->>DB: Command(resume=approve/reject)
+
+        alt approve
+            DB->>Calendar: create_event() — 그래프 재개
+            Calendar-->>DB: event_id
+            DB->>Memory: HITL 승인 패턴 저장
+            DB->>Slack: ✅ 등록 완료 메시지로 교체
+        else reject
+            DB->>Memory: 거절 패턴 저장
+            DB->>Slack: ❌ 무시됨 메시지로 교체
+        end
+    end
+
+    Note over Memory,Calendar: 6. 학습 → 다음 사이클에 반영
+    Memory->>Parser: 다음 유사 이메일 처리 시 패턴 참조
+```
 
 ### 주요 기능
 
