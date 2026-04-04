@@ -8,3 +8,5 @@ __pycache__/
 .pytest_cache/
 dist/
 *.egg-info/
+claude.md
+PLAN.md
