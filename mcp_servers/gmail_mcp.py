@@ -175,3 +175,81 @@ def mark_read_logic(service: Any, email_id: str) -> bool:
     except Exception as e:
         logger.error(f"mark_read failed for {email_id}: {e}")
         return False
+
+
+def send_reply_logic(service: Any, thread_id: str, body: str, to: str) -> bool:
+    """이메일에 답장을 보낸다.
+
+    Args:
+        service: Gmail API 클라이언트
+        thread_id: 답장할 스레드 ID
+        body: 답장 본문
+        to: 수신자 이메일
+
+    Returns:
+        True: 성공, False: 실패
+    """
+    import base64
+    from email.mime.text import MIMEText
+
+    try:
+        message = MIMEText(body)
+        message["to"] = to
+        raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
+
+        service.users().messages().send(
+            userId="me",
+            body={"raw": raw, "threadId": thread_id},
+        ).execute()
+        return True
+
+    except Exception as e:
+        logger.error(f"send_reply failed for thread {thread_id}: {e}")
+        return False
+
+
+def archive_email_logic(service: Any, email_id: str) -> bool:
+    """이메일을 아카이브한다 (INBOX 라벨 제거).
+
+    Args:
+        service: Gmail API 클라이언트
+        email_id: Gmail 메시지 ID
+
+    Returns:
+        True: 성공, False: 실패
+    """
+    try:
+        service.users().messages().modify(
+            userId="me",
+            id=email_id,
+            body={"removeLabelIds": ["INBOX"]},
+        ).execute()
+        return True
+
+    except Exception as e:
+        logger.error(f"archive_email failed for {email_id}: {e}")
+        return False
+
+
+def add_label_logic(service: Any, email_id: str, label_id: str) -> bool:
+    """이메일에 라벨을 추가한다.
+
+    Args:
+        service: Gmail API 클라이언트
+        email_id: Gmail 메시지 ID
+        label_id: 추가할 라벨 ID (예: "NEWSLETTER")
+
+    Returns:
+        True: 성공, False: 실패
+    """
+    try:
+        service.users().messages().modify(
+            userId="me",
+            id=email_id,
+            body={"addLabelIds": [label_id]},
+        ).execute()
+        return True
+
+    except Exception as e:
+        logger.error(f"add_label failed for {email_id}: {e}")
+        return False

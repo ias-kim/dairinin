@@ -120,3 +120,30 @@ def send_hitl_message(
     except Exception as e:
         logger.error(f"Slack send failed: {e}")
         return None
+
+
+def send_reply_notification(client, channel: str, subject: str, sender: str) -> bool:
+    """메일 답장 완료 알림을 Slack에 전송.
+
+    Args:
+        client: Slack WebClient
+        channel: 전송할 채널 ID
+        subject: 답장한 이메일 제목
+        sender: 답장 대상 이메일 주소
+
+    Returns:
+        True: 성공, False: 실패
+    """
+    text = f"✅ 메일 답장 완료\n*제목*: {subject}\n*수신자*: {sender}"
+
+    try:
+        client.chat_postMessage(
+            channel=channel,
+            text=text,
+            unfurl_links=False,
+        )
+        logger.info(f"Reply notification sent: {subject} → {sender}")
+        return True
+    except Exception as e:
+        logger.error(f"send_reply_notification failed: {e}")
+        return False

@@ -129,6 +129,84 @@ class TestNotifierHitl:
         assert result["notification"] == "hitl_resolved"
 
 
+class TestNotifierAutoRegisterReplyAndSlack:
+
+    def test_auto_register_sends_reply(self):
+        """auto_register → sender에게 답장 전송."""
+        from agents.notifier import notify_node
+
+        parsed = EventJSON(title="팀 미팅", event_datetime=datetime(2026, 5, 1, 14, 0), duration=60)
+
+        with (
+            patch("agents.notifier.create_event_logic", return_value={"status": "dry_run"}),
+            patch("agents.notifier.mark_read_logic"),
+            patch("agents.notifier.get_memory_store", return_value=MagicMock()),
+            patch("agents.notifier.get_hitl_store", return_value=MagicMock()),
+            patch("agents.notifier.send_reply_logic") as mock_reply,
+            patch("agents.notifier.send_reply_notification", return_value=True),
+        ):
+            notify_node({
+                "email_id": "msg_10",
+                "parsed_event": parsed,
+                "confidence": 0.9,
+                "action": "auto_register",
+                "sender": "kim@example.com",
+                "subject": "팀 미팅 요청",
+            })
+
+        mock_reply.assert_called_once()
+
+    def test_auto_register_sends_slack_notification(self):
+        """auto_register → Slack 알림 전송."""
+        from agents.notifier import notify_node
+
+        parsed = EventJSON(title="팀 미팅", event_datetime=datetime(2026, 5, 1, 14, 0), duration=60)
+
+        with (
+            patch("agents.notifier.create_event_logic", return_value={"status": "dry_run"}),
+            patch("agents.notifier.mark_read_logic"),
+            patch("agents.notifier.get_memory_store", return_value=MagicMock()),
+            patch("agents.notifier.get_hitl_store", return_value=MagicMock()),
+            patch("agents.notifier.send_reply_logic"),
+            patch("agents.notifier.send_reply_notification") as mock_slack,
+        ):
+            notify_node({
+                "email_id": "msg_11",
+                "parsed_event": parsed,
+                "confidence": 0.9,
+                "action": "auto_register",
+                "sender": "kim@example.com",
+                "subject": "팀 미팅 요청",
+            })
+
+        mock_slack.assert_called_once()
+
+    def test_reply_failure_does_not_block_pipeline(self):
+        """답장 실패해도 파이프라인 계속 진행."""
+        from agents.notifier import notify_node
+
+        parsed = EventJSON(title="미팅", event_datetime=datetime(2026, 5, 1, 14, 0))
+
+        with (
+            patch("agents.notifier.create_event_logic", return_value={"status": "dry_run"}),
+            patch("agents.notifier.mark_read_logic"),
+            patch("agents.notifier.get_memory_store", return_value=MagicMock()),
+            patch("agents.notifier.get_hitl_store", return_value=MagicMock()),
+            patch("agents.notifier.send_reply_logic", side_effect=Exception("smtp error")),
+            patch("agents.notifier.send_reply_notification", return_value=False),
+        ):
+            result = notify_node({
+                "email_id": "msg_12",
+                "parsed_event": parsed,
+                "confidence": 0.9,
+                "action": "auto_register",
+                "sender": "kim@example.com",
+                "subject": "미팅",
+            })
+
+        assert result["notification"] == "auto_register"
+
+
 class TestNotifierSkip:
 
     def test_skip_marks_read_only(self):

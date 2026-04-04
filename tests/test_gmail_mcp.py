@@ -23,7 +23,7 @@ gmail-mcp의 역할:
 from unittest.mock import MagicMock, patch
 import pytest
 
-from mcp_servers.gmail_mcp import fetch_emails_logic, mark_read_logic
+from mcp_servers.gmail_mcp import fetch_emails_logic, mark_read_logic, send_reply_logic, archive_email_logic, add_label_logic
 
 
 class TestFetchEmails:
@@ -130,13 +130,87 @@ class TestMarkRead:
         assert result is True
 
     def test_returns_false_on_error(self):
-        """mark_read 실패해도 시스템 죽으면 안 됨.
-
-        eng review: mark_read 실패는 "이메일이 다음 폴링에서 다시 잡힘" 정도.
-        치명적이지 않으므로 로그만 남기고 계속.
-        """
+        """mark_read 실패해도 시스템 죽으면 안 됨."""
         mock_service = MagicMock()
         mock_service.users().messages().modify().execute.side_effect = Exception("API error")
 
         result = mark_read_logic(mock_service, "msg_1")
+        assert result is False
+
+
+class TestSendReply:
+    """send_reply_logic 테스트."""
+
+    def test_send_reply_success(self):
+        """답장 전송 성공."""
+        mock_service = MagicMock()
+        mock_service.users().messages().send().execute.return_value = {"id": "sent_1"}
+
+        result = send_reply_logic(mock_service, "thread_abc", "답장 내용입니다", "to@example.com")
+
+        assert result is True
+        # send가 실제 구현에서 호출됐는지 확인 (setup 호출 포함해 2회)
+        assert mock_service.users().messages().send.call_count >= 1
+
+    def test_send_reply_failure_returns_false(self):
+        """답장 실패해도 시스템 죽으면 안 됨."""
+        mock_service = MagicMock()
+        mock_service.users().messages().send().execute.side_effect = Exception("API error")
+
+        result = send_reply_logic(mock_service, "thread_abc", "내용", "to@example.com")
+
+        assert result is False
+
+
+class TestArchiveEmail:
+    """archive_email_logic 테스트."""
+
+    def test_archive_removes_inbox_label(self):
+        """아카이브 = INBOX 라벨 제거."""
+        mock_service = MagicMock()
+        mock_service.users().messages().modify().execute.return_value = {"id": "msg_1"}
+
+        result = archive_email_logic(mock_service, "msg_1")
+
+        mock_service.users().messages().modify.assert_called_with(
+            userId="me",
+            id="msg_1",
+            body={"removeLabelIds": ["INBOX"]},
+        )
+        assert result is True
+
+    def test_archive_failure_returns_false(self):
+        """아카이브 실패해도 시스템 죽으면 안 됨."""
+        mock_service = MagicMock()
+        mock_service.users().messages().modify().execute.side_effect = Exception("API error")
+
+        result = archive_email_logic(mock_service, "msg_1")
+
+        assert result is False
+
+
+class TestAddLabel:
+    """add_label_logic 테스트."""
+
+    def test_add_label_success(self):
+        """라벨 추가 성공."""
+        mock_service = MagicMock()
+        mock_service.users().messages().modify().execute.return_value = {"id": "msg_1"}
+
+        result = add_label_logic(mock_service, "msg_1", "NEWSLETTER")
+
+        mock_service.users().messages().modify.assert_called_with(
+            userId="me",
+            id="msg_1",
+            body={"addLabelIds": ["NEWSLETTER"]},
+        )
+        assert result is True
+
+    def test_add_label_failure_returns_false(self):
+        """라벨 추가 실패해도 시스템 죽으면 안 됨."""
+        mock_service = MagicMock()
+        mock_service.users().messages().modify().execute.side_effect = Exception("API error")
+
+        result = add_label_logic(mock_service, "msg_1", "NEWSLETTER")
+
         assert result is False

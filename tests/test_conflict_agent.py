@@ -4,9 +4,11 @@ Conflict Agent 테스트.
 confidence + conflicts로 최종 action 결정.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from utils.models import EventJSON
+
+_FUTURE = datetime.now(timezone.utc) + timedelta(days=7)
 
 
 class TestConflictAgent:
@@ -16,7 +18,7 @@ class TestConflictAgent:
         from agents.conflict import conflict_decision_node
 
         result = conflict_decision_node({
-            "parsed_event": EventJSON(title="치과", event_datetime=datetime(2026, 4, 1, 15, 0)),
+            "parsed_event": EventJSON(title="치과", event_datetime=_FUTURE),
             "confidence": 0.9,
             "conflicts": [],
         })
@@ -28,7 +30,7 @@ class TestConflictAgent:
         from agents.conflict import conflict_decision_node
 
         result = conflict_decision_node({
-            "parsed_event": EventJSON(title="미팅", event_datetime=datetime(2026, 4, 1, 14, 0)),
+            "parsed_event": EventJSON(title="미팅", event_datetime=_FUTURE),
             "confidence": 0.95,
             "conflicts": [{"summary": "기존 미팅", "id": "evt_1"}],
         })
@@ -40,7 +42,7 @@ class TestConflictAgent:
         from agents.conflict import conflict_decision_node
 
         result = conflict_decision_node({
-            "parsed_event": EventJSON(title="뭔가", event_datetime=datetime(2026, 4, 1, 10, 0)),
+            "parsed_event": EventJSON(title="뭔가", event_datetime=_FUTURE),
             "confidence": 0.5,
             "conflicts": [],
         })

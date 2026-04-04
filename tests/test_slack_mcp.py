@@ -72,3 +72,39 @@ class TestSlackMcp:
         )
 
         assert result is None
+
+
+class TestSendReplyNotification:
+
+    def test_send_reply_notification_success(self):
+        """답장 완료 Slack 알림 전송."""
+        from mcp_servers.slack_mcp import send_reply_notification
+
+        mock_client = MagicMock()
+        mock_client.chat_postMessage.return_value = {"ok": True, "ts": "999.111"}
+
+        result = send_reply_notification(
+            client=mock_client,
+            channel="C0123",
+            subject="Meeting request",
+            sender="kim@example.com",
+        )
+
+        mock_client.chat_postMessage.assert_called_once()
+        assert result is True
+
+    def test_send_reply_notification_failure_returns_false(self):
+        """Slack 에러 → False 반환."""
+        from mcp_servers.slack_mcp import send_reply_notification
+
+        mock_client = MagicMock()
+        mock_client.chat_postMessage.side_effect = Exception("channel_not_found")
+
+        result = send_reply_notification(
+            client=mock_client,
+            channel="C0123",
+            subject="미팅",
+            sender="kim@example.com",
+        )
+
+        assert result is False

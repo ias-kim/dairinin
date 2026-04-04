@@ -102,6 +102,11 @@ LangGraph Pipeline (graph/orchestrator.py)
 
 ## Next Steps (Priority Order)
 
+### Priority 0: 보안 + Dedup (Critical)
+- `app.py` `/webhook/slack`, `/webhook/slack/interact`에 `X-Slack-Signature` HMAC 검증 추가
+- `app.py` 폴링 루프에 `processed_email_ids` 세트 추가 (재시작 간 영속화는 Priority 3에서)
+- TDD 적용: 테스트 먼저 → RED → 구현 → GREEN
+
 ### Priority 1: 테스트 수정 (5개 FAIL → GREEN)
 - `tests/test_conflict_agent.py`: 하드코딩 날짜를 `datetime.now(timezone.utc) + timedelta(days=N)`으로 교체
 - `tests/test_orchestrator.py`: 동일 수정
@@ -146,4 +151,22 @@ LangGraph Pipeline (graph/orchestrator.py)
 | Eng Review | `/plan-eng-review` | Architecture & tests (required) | 0 | — | — |
 | Design Review | `/plan-design-review` | UI/UX gaps | 0 | — | — |
 
-**VERDICT:** NO REVIEWS YET — `/autoplan` 실행 대기 중.
+**VERDICT:** APPROVED — /autoplan 완료. P0 보안 → P1 테스트 → P2 classifier → P3 DRY_RUN → P4 mem0 순서로 진행.
+
+---
+
+## Decision Audit Trail
+
+<!-- AUTONOMOUS DECISION LOG -->
+
+| # | Phase | Decision | Classification | Principle | Rationale | Rejected |
+|---|-------|----------|----------------|-----------|-----------|---------|
+| 1 | CEO | Mode: SELECTIVE EXPANSION | Mechanical | P1+P3 | 전략 변경 없이 즉시 실용적 개선 집중 | SCOPE EXPANSION |
+| 2 | CEO | Priority 순서 유지 (1→2→3→4) | Mechanical | P3 | 검증된 코드 활용, 즉시 실용적 | C: 전체 리팩토링 |
+| 3 | CEO | Gmail Push API → TODOS.md | Mechanical | P2+P3 | 폴링도 동작하고, Push API는 별도 인프라 필요 | 즉시 교체 |
+| 4 | CEO | DRY_RUN 환경변수 문서화 추가 | Mechanical | P2 | blast radius 1 파일, 즉각적 가치 | 그냥 무시 |
+| 5 | CEO | UI 없음 → Phase 2 Design 스킵 | Mechanical | P5 | PLAN.md에 UI 관련 키워드 없음 | Design 강제 실행 |
+| 6 | Eng | HITL thread_id "없음" → 실제 구현됨 확인 | Mechanical | P5 | db/hitl_store.py PostgreSQL 저장 구현 확인 | 재구현 |
+| 7 | Eng | Gmail 토큰 "파일 의존" → 환경변수 기반 확인 | Mechanical | P5 | GOOGLE_REFRESH_TOKEN 환경변수 사용 중 | 재구현 |
+| 8 | Eng | Slack HMAC 검증 → PLAN 추가 Priority | Taste | P1 | Security critical, blast radius 1 파일 | 무시 |
+| 9 | Eng | 이메일 dedup → PLAN 추가 | Taste | P1+P2 | 중복 등록 방지, blast radius app.py+test | 무시 |

@@ -4,7 +4,7 @@ Orchestrator 통합 테스트.
 전체 파이프라인: parser → scheduler → conflict → notifier
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 from graph.orchestrator import build_graph
@@ -17,7 +17,7 @@ class TestOrchestrator:
         """이벤트 이메일 + 충돌 없음 → auto_register → notifier 실행."""
         mock_event = EventJSON(
             title="Team standup",
-            event_datetime=datetime(2026, 3, 31, 10, 0),
+            event_datetime=datetime.now(timezone.utc) + timedelta(days=7),
         )
 
         with (
@@ -43,17 +43,21 @@ class TestOrchestrator:
 
     def test_hitl_flow_with_conflict(self):
         """충돌 있음 → hitl_required → notifier는 로그만."""
+        future = datetime.now(timezone.utc) + timedelta(days=7)
+        future_str = future.strftime("%Y-%m-%dT%H:%M:%S+00:00")
+        future_end_str = (future + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+
         mock_event = EventJSON(
             title="Meeting",
-            event_datetime=datetime(2026, 3, 31, 14, 0),
+            event_datetime=future,
             duration=60,
         )
 
         existing = [{
             "id": "evt_1",
             "summary": "기존 미팅",
-            "start": {"dateTime": "2026-03-31T14:00:00+09:00"},
-            "end": {"dateTime": "2026-03-31T15:00:00+09:00"},
+            "start": {"dateTime": future_str},
+            "end": {"dateTime": future_end_str},
         }]
 
         with (
