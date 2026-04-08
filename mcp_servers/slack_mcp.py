@@ -12,7 +12,11 @@ import logging
 import os
 from typing import Optional
 
+from fastmcp import FastMCP
+
 logger = logging.getLogger(__name__)
+
+mcp = FastMCP("slack")
 
 
 def build_slack_client():
@@ -147,3 +151,34 @@ def send_reply_notification(client, channel: str, subject: str, sender: str) -> 
     except Exception as e:
         logger.error(f"send_reply_notification failed: {e}")
         return False
+
+
+# ──────────────────────────────────────────────
+# FastMCP 툴
+# ──────────────────────────────────────────────
+
+@mcp.tool
+def send_hitl(
+    channel: str,
+    title: str,
+    datetime_str: str,
+    confidence: float,
+    conflicts: list[str],
+    email_id: str,
+    sender: str = "",
+    snippet: str = "",
+) -> Optional[dict]:
+    """HITL 메시지를 Slack Block Kit 버튼과 함께 전송."""
+    client = build_slack_client()
+    return send_hitl_message(client, channel, title, datetime_str, confidence, conflicts, email_id, sender, snippet)
+
+
+@mcp.tool
+def send_reply_notification_tool(channel: str, subject: str, sender: str) -> bool:
+    """메일 답장 완료 알림을 Slack에 전송."""
+    client = build_slack_client()
+    return send_reply_notification(client, channel, subject, sender)
+
+
+if __name__ == "__main__":
+    mcp.run()

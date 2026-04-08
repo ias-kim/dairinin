@@ -40,6 +40,7 @@ from datetime import datetime, timedelta, timezone
 
 from dateutil.parser import isoparse
 from dotenv import load_dotenv
+from fastmcp import FastMCP
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
@@ -47,6 +48,8 @@ from googleapiclient.discovery import build
 logger = logging.getLogger(__name__)
 
 load_dotenv()
+
+mcp = FastMCP("calendar")
 
 
 # ──────────────────────────────────────────────
@@ -260,3 +263,50 @@ def create_event_logic(
             "error": str(e),
             "summary": summary,
         }
+
+
+# ──────────────────────────────────────────────
+# FastMCP 툴
+# ──────────────────────────────────────────────
+
+@mcp.tool
+def get_events(date: str, calendar_id: str = "primary") -> list[dict]:
+    """특정 날짜의 캘린더 이벤트를 가져온다."""
+    service = build_calendar_service()
+    return get_events_logic(service, date, calendar_id)
+
+
+@mcp.tool
+def check_conflicts(new_start: str, new_end: str) -> list[dict]:
+    """새 이벤트 시간에 충돌하는 기존 일정을 찾는다.
+
+    내부적으로 get_events_logic을 호출해서 당일 이벤트를 가져온 후 겹침 계산.
+    """
+    service = build_calendar_service()
+    date = new_start[:10]  # "2026-04-08T14:00:00+09:00" → "2026-04-08"
+    existing = get_events_logic(service, date)
+    return check_conflicts_logic(existing, new_start, new_end)
+
+
+@mcp.tool
+def create_event(
+    summary: str,
+    start: str,
+    end: str,
+    location: str = "",
+    description: str = "",
+    attendees: list[str] | None = None,
+    calendar_id: str = "primary",
+) -> dict:
+    """캘린더에 이벤트를 생성한다. DRY_RUN 환경변수로 제어."""
+    import os
+    dry_run = os.getenv("DRY_RUN", "true").lower() == "true"
+    service = build_calendar_service()
+    return create_event_logic(
+        service, summary, start, end, dry_run,
+        location or None, description or None, attendees, calendar_id,
+    )
+
+
+if __name__ == "__main__":
+    mcp.run()

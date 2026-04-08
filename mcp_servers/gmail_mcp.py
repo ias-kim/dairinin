@@ -40,6 +40,7 @@ import os
 from typing import Any
 
 from dotenv import load_dotenv
+from fastmcp import FastMCP
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
@@ -47,6 +48,9 @@ from googleapiclient.discovery import build
 logger = logging.getLogger(__name__)
 
 load_dotenv()
+
+# MCP 서버 인스턴스 — 툴들이 여기에 등록됨
+mcp = FastMCP("gmail")
 
 # ──────────────────────────────────────────────
 # Gmail API 클라이언트 생성
@@ -253,3 +257,45 @@ def add_label_logic(service: Any, email_id: str, label_id: str) -> bool:
     except Exception as e:
         logger.error(f"add_label failed for {email_id}: {e}")
         return False
+
+
+# ──────────────────────────────────────────────
+# FastMCP 툴 — logic 함수를 MCP 프로토콜로 노출
+# ──────────────────────────────────────────────
+
+@mcp.tool
+def fetch_emails(max_results: int = 10) -> list[dict]:
+    """안 읽은 이메일 목록을 가져온다.
+
+    왜 @mcp.tool로 감싸는가:
+        logic 함수는 service 객체를 인자로 받음 → LLM이 직접 호출 불가.
+        MCP 툴은 인자 없이 호출 가능 → LLM이 "fetch_emails 해줘" 한 마디로 실행.
+    """
+    service = build_gmail_service()
+    return fetch_emails_logic(service, max_results)
+
+
+@mcp.tool
+def mark_read(email_id: str) -> bool:
+    """이메일을 읽음 처리한다."""
+    service = build_gmail_service()
+    return mark_read_logic(service, email_id)
+
+
+@mcp.tool
+def archive_email(email_id: str) -> bool:
+    """이메일을 아카이브한다 (INBOX 라벨 제거)."""
+    service = build_gmail_service()
+    return archive_email_logic(service, email_id)
+
+
+@mcp.tool
+def add_label(email_id: str, label_id: str) -> bool:
+    """이메일에 라벨을 추가한다."""
+    service = build_gmail_service()
+    return add_label_logic(service, email_id, label_id)
+
+
+if __name__ == "__main__":
+    # uvx fastmcp run mcp_servers/gmail_mcp.py 로 실행
+    mcp.run()

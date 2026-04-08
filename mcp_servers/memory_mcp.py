@@ -21,7 +21,11 @@ import logging
 import os
 from collections import defaultdict
 
+from fastmcp import FastMCP
+
 logger = logging.getLogger(__name__)
+
+mcp = FastMCP("memory")
 
 
 class MemoryStore:
@@ -130,3 +134,26 @@ class MemoryStore:
         Conflict Agent가 "10번 이상 승인했으면 threshold 낮추기"에 사용.
         """
         return len(self.query_patterns(user_id, query, limit=100))
+
+
+# ──────────────────────────────────────────────
+# FastMCP 툴 — 싱글톤 MemoryStore 인스턴스 공유
+# ──────────────────────────────────────────────
+
+_store = MemoryStore()
+
+
+@mcp.tool
+def write_pattern(user_id: str, pattern: str, metadata: dict | None = None) -> None:
+    """사용자 일정 패턴을 저장한다."""
+    _store.write_pattern(user_id, pattern, metadata)
+
+
+@mcp.tool
+def query_patterns(user_id: str, query: str, limit: int = 10) -> list[dict]:
+    """관련 패턴을 조회한다."""
+    return _store.query_patterns(user_id, query, limit)
+
+
+if __name__ == "__main__":
+    mcp.run()
