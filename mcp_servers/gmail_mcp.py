@@ -21,11 +21,14 @@ Gmail MCP 서버.
     fastmcp                 → MCP 서버 프레임워크
 
 함수 구조:
-    build_gmail_service()   → Gmail API 클라이언트 생성 (OAuth2 인증 포함)
-    fetch_emails_logic()    → 안 읽은 이메일 가져오기 (순수 로직, 테스트용)
-    mark_read_logic()       → 이메일 읽음 처리 (순수 로직, 테스트용)
-    fetch_emails()          → MCP 툴 (FastMCP @mcp.tool 데코레이터)
-    mark_read()             → MCP 툴 (FastMCP @mcp.tool 데코레이터)
+    build_gmail_service()       → Gmail API 클라이언트 생성 (OAuth2 인증 포함)
+    fetch_emails_logic()        → 안 읽은 이메일 가져오기 (순수 로직, 테스트용)
+    mark_read_logic()           → 이메일 읽음 처리 (순수 로직, 테스트용)
+    get_or_create_label()       → 라벨 ID 조회, 없으면 자동 생성 (순수 로직)
+    add_label_logic()           → 이메일에 라벨 추가 (순수 로직, 테스트용)
+    fetch_emails()              → MCP 툴 (FastMCP @mcp.tool 데코레이터)
+    mark_read()                 → MCP 툴 (FastMCP @mcp.tool 데코레이터)
+    add_label()                 → MCP 툴 (FastMCP @mcp.tool 데코레이터)
 
 왜 logic 함수와 MCP 툴을 분리하는가:
     MCP 툴은 FastMCP 프레임워크에 의존 → 테스트 시 MCP 서버를 띄워야 함.
@@ -235,18 +238,65 @@ def archive_email_logic(service: Any, email_id: str) -> bool:
         return False
 
 
-def add_label_logic(service: Any, email_id: str, label_id: str) -> bool:
+def get_or_create_label(service: Any, label_name: str) -> str:
+    """라벨 이름으로 라벨 ID를 반환한다. 라벨이 없으면 먼저 생성한다.
+
+    Gmail API는 사용자 정의 라벨(예: "NEWSLETTER")이 존재하지 않으면
+    messages().modify() 호출 시 "Invalid label" 에러를 반환한다.
+    이 함수는 라벨 존재 여부를 확인하고, 없으면 자동으로 생성한 뒤
+    라벨 ID를 반환해 add_label_logic()이 안전하게 라벨을 적용할 수 있게 한다.
+
+    Args:
+        service: Gmail API 클라이언트
+        label_name: 라벨 이름 (예: "NEWSLETTER")
+
+    Returns:
+        라벨 ID 문자열 (기존 라벨이면 기존 ID, 새로 생성하면 새 ID)
+
+    Raises:
+        Exception: Gmail API 호출 실패 시 그대로 전파
+    """
+    # 기존 라벨 목록에서 이름이 일치하는 라벨 검색
+    response = service.users().labels().list(userId="me").execute()
+    for label in response.get("labels", []):
+        if label["name"].upper() == label_name.upper():
+            return label["id"]
+
+    # 라벨이 없으면 새로 생성
+    logger.info(f"Label '{label_name}' not found — creating it")
+    created = (
+        service.users()
+        .labels()
+        .create(
+            userId="me",
+            body={
+                "name": label_name,
+                "labelListVisibility": "labelShow",
+                "messageListVisibility": "show",
+            },
+        )
+        .execute()
+    )
+    return created["id"]
+
+
+def add_label_logic(service: Any, email_id: str, label_name: str) -> bool:
     """이메일에 라벨을 추가한다.
+
+    라벨이 Gmail 계정에 존재하지 않으면 자동으로 생성한 뒤 적용한다.
+    Gmail API는 존재하지 않는 라벨 ID를 사용하면 "Invalid label" 에러를
+    반환하므로, get_or_create_label()로 라벨 ID를 먼저 확보한다.
 
     Args:
         service: Gmail API 클라이언트
         email_id: Gmail 메시지 ID
-        label_id: 추가할 라벨 ID (예: "NEWSLETTER")
+        label_name: 추가할 라벨 이름 (예: "NEWSLETTER")
 
     Returns:
         True: 성공, False: 실패
     """
     try:
+        label_id = get_or_create_label(service, label_name)
         service.users().messages().modify(
             userId="me",
             id=email_id,
@@ -290,10 +340,10 @@ def archive_email(email_id: str) -> bool:
 
 
 @mcp.tool
-def add_label(email_id: str, label_id: str) -> bool:
-    """이메일에 라벨을 추가한다."""
+def add_label(email_id: str, label_name: str) -> bool:
+    """이메일에 라벨을 추가한다. 라벨이 없으면 자동으로 생성한다."""
     service = build_gmail_service()
-    return add_label_logic(service, email_id, label_id)
+    return add_label_logic(service, email_id, label_name)
 
 
 if __name__ == "__main__":

@@ -262,8 +262,12 @@ class TestAddLabel:
     """add_label_logic 테스트."""
 
     def test_add_label_success(self):
-        """라벨 추가 성공."""
+        """라벨 추가 성공 — 기존 라벨 ID 조회 후 적용."""
         mock_service = MagicMock()
+        # get_or_create_label: 기존 라벨 목록에서 NEWSLETTER 반환
+        mock_service.users().labels().list().execute.return_value = {
+            "labels": [{"id": "Label_123", "name": "NEWSLETTER"}]
+        }
         mock_service.users().messages().modify().execute.return_value = {"id": "msg_1"}
 
         result = add_label_logic(mock_service, "msg_1", "NEWSLETTER")
@@ -271,7 +275,7 @@ class TestAddLabel:
         mock_service.users().messages().modify.assert_called_with(
             userId="me",
             id="msg_1",
-            body={"addLabelIds": ["NEWSLETTER"]},
+            body={"addLabelIds": ["Label_123"]},
         )
         assert result is True
 
