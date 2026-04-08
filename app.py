@@ -112,7 +112,7 @@ async def route_email(email: dict) -> None:
         category = classify_email(text)
     except Exception as e:
         logger.warning(f"EmailClassifier failed for {email_id}, falling back to pipeline: {e}")
-        process_single_email(email)
+        await asyncio.to_thread(process_single_email, email)
         return
 
     if category == "spam":
@@ -147,7 +147,7 @@ async def route_email(email: dict) -> None:
 
     elif category == "calendar":
         logger.info(f"  → CALENDAR: pipeline {email_id}")
-        process_single_email(email)
+        await asyncio.to_thread(process_single_email, email)
 
     else:  # other
         logger.info(f"  → OTHER: skipping {email_id}")
@@ -343,19 +343,29 @@ async def slack_interact(request: Request):
     actions = payload.get("actions", [])
     message_ts = payload.get("message", {}).get("ts", "")
 
+    from agents.notifier import get_hitl_store
+    hitl = get_hitl_store()
+
     for action in actions:
         action_id = action.get("action_id", "")
         value = json_mod.loads(action.get("value", "{}"))
 
+        # 이미 처리된 요청인지 먼저 확인
+        if not hitl.lookup_by_slack_ts(message_ts):
+            return JSONResponse({
+                "replace_original": True,
+                "text": "⚠️ 이미 처리된 요청입니다.",
+            })
+
         if action_id == "hitl_approve":
-            _resume_hitl(message_ts, "approve")
-            # 버튼을 "✅ 등록됨"으로 교체
+            # 백그라운드에서 LangGraph resume (3초 타임아웃 방지)
+            asyncio.create_task(asyncio.to_thread(_resume_hitl, message_ts, "approve"))
             return JSONResponse({
                 "replace_original": True,
                 "text": f"✅ 등록 완료: {value.get('email_id', '')}",
             })
         elif action_id == "hitl_reject":
-            _resume_hitl(message_ts, "reject")
+            asyncio.create_task(asyncio.to_thread(_resume_hitl, message_ts, "reject"))
             return JSONResponse({
                 "replace_original": True,
                 "text": f"❌ 무시됨: {value.get('email_id', '')}",
@@ -387,7 +397,7 @@ def _resume_hitl(slack_ts: str, decision: str):
     try:
         graph = build_graph()
         graph.invoke(
-            Command(resume=decision),
+            Command(resume=decision, update={"hitl_response": decision}),
             config={"configurable": {"thread_id": thread_id}},
         )
         hitl.remove(slack_ts)
