@@ -4,7 +4,23 @@ memory-mcp 테스트.
 인메모리 fallback으로 테스트. mem0 서버 불필요.
 """
 
+import pytest
 from mcp_servers.memory_mcp import MemoryStore
+
+
+class TestMcpTools:
+
+    @pytest.mark.asyncio
+    async def test_tools_are_registered(self):
+        """write_pattern, query_patterns 툴 등록 확인."""
+        from fastmcp import Client
+        from mcp_servers.memory_mcp import mcp
+
+        async with Client(mcp) as client:
+            tools = await client.list_tools()
+            tool_names = [t.name for t in tools]
+            assert "write_pattern" in tool_names
+            assert "query_patterns" in tool_names
 
 
 class TestMemoryStore:

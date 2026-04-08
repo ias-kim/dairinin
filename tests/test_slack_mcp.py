@@ -4,8 +4,33 @@ slack-mcp 테스트.
 HITL 메시지를 Slack 채널에 전송.
 Slack SDK를 mock해서 API 호출 없이 테스트.
 """
-
+import pytest
+import pytest
 from unittest.mock import MagicMock, patch
+
+
+class TestMcpTools:
+    """FastMCP @mcp.tool 레이어 테스트."""
+
+    @pytest.mark.asyncio
+    async def test_send_hitl_tool_is_registered(self):
+        from fastmcp import Client
+        from mcp_servers.slack_mcp import mcp
+
+        async with Client(mcp) as client:
+            tools = await client.list_tools()
+            tool_names = [t.name for t in tools]
+            assert "send_hitl" in tool_names
+
+    @pytest.mark.asyncio
+    async def test_send_reply_notification_tool_is_registered(self):
+        from fastmcp import Client
+        from mcp_servers.slack_mcp import mcp
+
+        async with Client(mcp) as client:
+            tools = await client.list_tools()
+            tool_names = [t.name for t in tools]
+            assert "send_reply_notification_tool" in tool_names
 
 
 class TestSlackMcp:

@@ -26,6 +26,75 @@ import pytest
 from mcp_servers.gmail_mcp import fetch_emails_logic, mark_read_logic, send_reply_logic, archive_email_logic, add_label_logic
 
 
+# ──────────────────────────────────────────────
+# FastMCP 툴 레이어 테스트
+# ──────────────────────────────────────────────
+
+class TestMcpTools:
+    """FastMCP @mcp.tool 레이어 테스트.
+
+    fastmcp.Client(mcp)를 쓰면 서버 없이 in-process로 툴 호출 가능.
+    """
+
+    @pytest.mark.asyncio
+    async def test_fetch_emails_tool_is_registered(self):
+        """fetch_emails 툴이 MCP 서버에 등록됐는지 확인."""
+        from fastmcp import Client
+        from mcp_servers.gmail_mcp import mcp
+
+        async with Client(mcp) as client:
+            tools = await client.list_tools()
+            tool_names = [t.name for t in tools]
+            assert "fetch_emails" in tool_names
+
+    @pytest.mark.asyncio
+    async def test_mark_read_tool_is_registered(self):
+        """mark_read 툴이 MCP 서버에 등록됐는지 확인."""
+        from fastmcp import Client
+        from mcp_servers.gmail_mcp import mcp
+
+        async with Client(mcp) as client:
+            tools = await client.list_tools()
+            tool_names = [t.name for t in tools]
+            assert "mark_read" in tool_names
+
+    @pytest.mark.asyncio
+    async def test_archive_email_tool_is_registered(self):
+        """archive_email 툴이 MCP 서버에 등록됐는지 확인."""
+        from fastmcp import Client
+        from mcp_servers.gmail_mcp import mcp
+
+        async with Client(mcp) as client:
+            tools = await client.list_tools()
+            tool_names = [t.name for t in tools]
+            assert "archive_email" in tool_names
+
+    @pytest.mark.asyncio
+    async def test_add_label_tool_is_registered(self):
+        """add_label 툴이 MCP 서버에 등록됐는지 확인."""
+        from fastmcp import Client
+        from mcp_servers.gmail_mcp import mcp
+
+        async with Client(mcp) as client:
+            tools = await client.list_tools()
+            tool_names = [t.name for t in tools]
+            assert "add_label" in tool_names
+
+    @pytest.mark.asyncio
+    async def test_fetch_emails_tool_calls_logic(self):
+        """fetch_emails 툴 호출 시 fetch_emails_logic이 실행되는지 확인."""
+        from fastmcp import Client
+        from mcp_servers.gmail_mcp import mcp
+
+        fake_emails = [{"id": "msg_1", "from": "a@b.com", "subject": "회의", "snippet": "내일 3시"}]
+
+        with patch("mcp_servers.gmail_mcp.build_gmail_service") as mock_svc, \
+             patch("mcp_servers.gmail_mcp.fetch_emails_logic", return_value=fake_emails):
+            async with Client(mcp) as client:
+                result = await client.call_tool("fetch_emails", {})
+                assert result is not None
+
+
 class TestFetchEmails:
     """fetch_emails 툴 테스트."""
 

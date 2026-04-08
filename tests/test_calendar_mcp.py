@@ -15,6 +15,7 @@ calendar-mcp의 역할:
     create_event → DRY_RUN 플래그에 따라 실제 API 호출 여부 결정
 """
 
+import pytest
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
@@ -23,6 +24,23 @@ from mcp_servers.calendar_mcp import (
     create_event_logic,
     get_events_logic,
 )
+
+
+class TestMcpTools:
+    """FastMCP @mcp.tool 레이어 테스트."""
+
+    @pytest.mark.asyncio
+    async def test_tools_are_registered(self):
+        """get_events, check_conflicts, create_event 툴 등록 확인."""
+        from fastmcp import Client
+        from mcp_servers.calendar_mcp import mcp
+
+        async with Client(mcp) as client:
+            tools = await client.list_tools()
+            tool_names = [t.name for t in tools]
+            assert "get_events" in tool_names
+            assert "check_conflicts" in tool_names
+            assert "create_event" in tool_names
 
 
 class TestGetEvents:
