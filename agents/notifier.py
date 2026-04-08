@@ -202,10 +202,36 @@ def _handle_hitl(state: ScheduleState):
                 snippet=state.get("raw_email", ""),
             )
 
-            if result and result.get("ts"):
+            logger.info(f"send_hitl_message result: {result}")
+
+            if result is None:
+                logger.error(
+                    f"send_hitl_message returned None for email_id={email_id!r} — "
+                    "Slack message may not have been sent; slack_ts will not be stored"
+                )
+            elif not result.get("ts"):
+                logger.error(
+                    f"send_hitl_message result missing 'ts' for email_id={email_id!r} — "
+                    f"full result: {result}; slack_ts will not be stored"
+                )
+            else:
                 hitl = get_hitl_store()
                 thread_id = state.get("_thread_id", str(uuid.uuid4()))
-                hitl.insert(result["ts"], thread_id, email_id)
+                logger.info(
+                    f"Inserting HITL mapping: slack_ts={result['ts']!r} "
+                    f"thread_id={thread_id!r} email_id={email_id!r}"
+                )
+                inserted = hitl.insert(result["ts"], thread_id, email_id)
+                if inserted:
+                    logger.info(
+                        f"HITL mapping stored successfully: slack_ts={result['ts']!r} "
+                        f"thread_id={thread_id!r} email_id={email_id!r}"
+                    )
+                else:
+                    logger.warning(
+                        f"hitl.insert() returned False for slack_ts={result['ts']!r} "
+                        f"email_id={email_id!r} — mapping may already exist (duplicate guard triggered)"
+                    )
 
         except Exception as e:
             logger.error(f"Slack HITL failed: {e}")
