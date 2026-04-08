@@ -191,48 +191,56 @@ class TestSlackWebhookHMAC:
 class TestRouteEmail:
     """route_email() — EmailClassifier 기반 분기 테스트."""
 
-    def test_spam_archived(self):
-        """spam → archive_email_logic 호출."""
+    @pytest.mark.asyncio
+    async def test_spam_archived(self):
+        """spam → archive_email MCP 툴 호출."""
         from app import route_email
 
         with (
             patch("app.classify_email", return_value="spam"),
-            patch("app.archive_email_logic") as mock_archive,
-            patch("app.build_gmail_service", return_value=MagicMock()),
+            patch("mcp_servers.gmail_mcp.archive_email_logic") as mock_archive,
+            patch("mcp_servers.gmail_mcp.build_gmail_service", return_value=MagicMock()),
         ):
-            route_email({"id": "msg_1", "from": "spam@evil.com", "subject": "WIN!", "snippet": "click now"})
+            mock_archive.return_value = True
+            await route_email({"id": "msg_1", "from": "spam@evil.com", "subject": "WIN!", "snippet": "click now"})
 
         mock_archive.assert_called_once()
 
-    def test_newsletter_labeled_and_skipped(self):
-        """newsletter → add_label_logic 호출, LangGraph 미실행."""
+    @pytest.mark.asyncio
+    async def test_newsletter_labeled_and_skipped(self):
+        """newsletter → add_label MCP 툴 호출, LangGraph 미실행."""
         from app import route_email
 
         with (
             patch("app.classify_email", return_value="newsletter"),
-            patch("app.add_label_logic") as mock_label,
-            patch("app.build_gmail_service", return_value=MagicMock()),
+            patch("mcp_servers.gmail_mcp.add_label_logic") as mock_label,
+            patch("mcp_servers.gmail_mcp.build_gmail_service", return_value=MagicMock()),
             patch("app.process_single_email") as mock_pipeline,
         ):
-            route_email({"id": "msg_2", "from": "news@example.com", "subject": "Weekly", "snippet": "..."})
+            mock_label.return_value = True
+            await route_email({"id": "msg_2", "from": "news@example.com", "subject": "Weekly", "snippet": "..."})
 
         mock_label.assert_called_once()
         mock_pipeline.assert_not_called()
 
-    def test_important_sends_slack_notification(self):
-        """important → Slack 알림 전송."""
+    @pytest.mark.asyncio
+    async def test_important_sends_slack_notification(self):
+        """important → Slack send_reply_notification_tool MCP 툴 호출."""
         from app import route_email
 
         with (
             patch("app.classify_email", return_value="important"),
-            patch("app.send_reply_notification") as mock_slack,
-            patch("app.build_slack_client", return_value=MagicMock()),
+            patch("mcp_servers.slack_mcp.send_reply_notification") as mock_slack,
+            patch("mcp_servers.slack_mcp.build_slack_client", return_value=MagicMock()),
+            patch.dict("os.environ", {"SLACK_CHANNEL_ID": "C0123"}),
         ):
-            route_email({"id": "msg_3", "from": "boss@example.com", "subject": "URGENT", "snippet": "..."})
+            mock_slack.return_value = True
+            await route_email({"id": "msg_3", "from": "boss@example.com", "subject": "URGENT", "snippet": "..."})
 
         mock_slack.assert_called_once()
 
-    def test_calendar_runs_pipeline(self):
+    @pytest.mark.asyncio
+    async def test_calendar_runs_pipeline(self):
         """calendar → process_single_email 실행."""
         from app import route_email
 
@@ -240,11 +248,12 @@ class TestRouteEmail:
             patch("app.classify_email", return_value="calendar"),
             patch("app.process_single_email") as mock_pipeline,
         ):
-            route_email({"id": "msg_4", "from": "team@example.com", "subject": "Meeting", "snippet": "Let's meet"})
+            await route_email({"id": "msg_4", "from": "team@example.com", "subject": "Meeting", "snippet": "Let's meet"})
 
         mock_pipeline.assert_called_once()
 
-    def test_other_skipped(self):
+    @pytest.mark.asyncio
+    async def test_other_skipped(self):
         """other → 아무것도 하지 않음."""
         from app import route_email
 
@@ -252,11 +261,12 @@ class TestRouteEmail:
             patch("app.classify_email", return_value="other"),
             patch("app.process_single_email") as mock_pipeline,
         ):
-            route_email({"id": "msg_5", "from": "x@x.com", "subject": "Thanks", "snippet": "ty"})
+            await route_email({"id": "msg_5", "from": "x@x.com", "subject": "Thanks", "snippet": "ty"})
 
         mock_pipeline.assert_not_called()
 
-    def test_classifier_error_falls_back_to_pipeline(self):
+    @pytest.mark.asyncio
+    async def test_classifier_error_falls_back_to_pipeline(self):
         """classifier 오류 → 안전하게 LangGraph 파이프라인으로 처리."""
         from app import route_email
 
@@ -264,7 +274,7 @@ class TestRouteEmail:
             patch("app.classify_email", side_effect=Exception("LLM error")),
             patch("app.process_single_email") as mock_pipeline,
         ):
-            route_email({"id": "msg_6", "from": "x@x.com", "subject": "Hi", "snippet": "hello"})
+            await route_email({"id": "msg_6", "from": "x@x.com", "subject": "Hi", "snippet": "hello"})
 
         mock_pipeline.assert_called_once()
 

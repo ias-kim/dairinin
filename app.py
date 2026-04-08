@@ -23,9 +23,11 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from fastmcp import Client
+
 from graph.orchestrator import build_graph
-from mcp_servers.gmail_mcp import archive_email_logic, add_label_logic, build_gmail_service
-from mcp_servers.slack_mcp import build_slack_client, send_reply_notification
+from mcp_servers.gmail_mcp import mcp as gmail_mcp
+from mcp_servers.slack_mcp import mcp as slack_mcp
 from utils.email_classifier import classify_email
 
 load_dotenv()
@@ -93,7 +95,7 @@ def _verify_slack_signature(request_body: bytes, timestamp: str, signature: str)
     return hmac.compare_digest(expected, signature)
 
 
-def route_email(email: dict) -> None:
+async def route_email(email: dict) -> None:
     """EmailClassifier로 분류 후 카테고리별 처리.
 
     calendar  → process_single_email (LangGraph 파이프라인)
@@ -116,16 +118,16 @@ def route_email(email: dict) -> None:
     if category == "spam":
         logger.info(f"  → SPAM: archiving {email_id}")
         try:
-            service = build_gmail_service()
-            archive_email_logic(service, email_id)
+            async with Client(gmail_mcp) as client:
+                await client.call_tool("archive_email", {"email_id": email_id})
         except Exception as e:
             logger.warning(f"archive failed: {e}")
 
     elif category == "newsletter":
         logger.info(f"  → NEWSLETTER: labeling {email_id}")
         try:
-            service = build_gmail_service()
-            add_label_logic(service, email_id, "NEWSLETTER")
+            async with Client(gmail_mcp) as client:
+                await client.call_tool("add_label", {"email_id": email_id, "label_id": "NEWSLETTER"})
         except Exception as e:
             logger.warning(f"add_label failed: {e}")
 
@@ -134,13 +136,12 @@ def route_email(email: dict) -> None:
         slack_channel = os.getenv("SLACK_CHANNEL_ID", "")
         if slack_channel:
             try:
-                client = build_slack_client()
-                send_reply_notification(
-                    client,
-                    slack_channel,
-                    email.get("subject", ""),
-                    email.get("from", ""),
-                )
+                async with Client(slack_mcp) as client:
+                    await client.call_tool("send_reply_notification_tool", {
+                        "channel": slack_channel,
+                        "subject": email.get("subject", ""),
+                        "sender": email.get("from", ""),
+                    })
             except Exception as e:
                 logger.warning(f"Slack notification failed: {e}")
 
@@ -208,11 +209,12 @@ async def poll_gmail_loop():
             _processing = True
 
             # Gmail에서 안 읽은 이메일 가져오기
-            from mcp_servers.gmail_mcp import build_gmail_service, fetch_emails_logic
-
             try:
-                service = build_gmail_service()
-                emails = fetch_emails_logic(service)
+                async with Client(gmail_mcp) as mcp_client:
+                    result = await mcp_client.call_tool("fetch_emails", {})
+                    emails = result[0].text if result else "[]"
+                    import json as _json
+                    emails = _json.loads(emails) if isinstance(emails, str) else emails
             except Exception as e:
                 logger.error(f"Gmail fetch failed: {e}")
                 emails = []
@@ -229,7 +231,7 @@ async def poll_gmail_loop():
                 logger.info(f"Processing: [{email.get('subject')}] from {email.get('from')}")
                 mark_processed(email_id)
 
-                route_email(email)
+                await route_email(email)
 
         except Exception as e:
             logger.error(f"Poll loop error: {e}")
