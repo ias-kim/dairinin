@@ -212,7 +212,7 @@ async def poll_gmail_loop():
             try:
                 async with Client(gmail_mcp) as mcp_client:
                     result = await mcp_client.call_tool("fetch_emails", {})
-                    emails = result[0].text if result else "[]"
+                    emails = result.content[0].text if result and result.content else "[]"
                     import json as _json
                     emails = _json.loads(emails) if isinstance(emails, str) else emails
             except Exception as e:
