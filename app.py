@@ -127,7 +127,7 @@ async def route_email(email: dict) -> None:
         logger.info(f"  → NEWSLETTER: labeling {email_id}")
         try:
             async with Client(gmail_mcp) as client:
-                await client.call_tool("add_label", {"email_id": email_id, "label_id": "NEWSLETTER"})
+                await client.call_tool("add_label", {"email_id": email_id, "label_name": "NEWSLETTER"})
         except Exception as e:
             logger.warning(f"add_label failed: {e}")
 
