@@ -128,6 +128,33 @@ class HitlStore:
                 return cur.fetchone() is not None
         return email_id in {v["email_id"] for v in self._store.values()}
 
+    def list_pending(self) -> list[dict]:
+        """대기 중인 HITL 목록 전체 반환."""
+        if self._use_postgres:
+            with self._conn.cursor() as cur:
+                cur.execute(
+                    "SELECT slack_ts, thread_id, email_id, created_at FROM hitl_pending ORDER BY created_at DESC"
+                )
+                rows = cur.fetchall()
+            return [
+                {
+                    "slack_ts": r[0],
+                    "thread_id": r[1],
+                    "email_id": r[2],
+                    "created_at": r[3].isoformat() if r[3] else None,
+                }
+                for r in rows
+            ]
+        return [
+            {
+                "slack_ts": ts,
+                "thread_id": v["thread_id"],
+                "email_id": v["email_id"],
+                "created_at": v["created_at"].isoformat() if hasattr(v["created_at"], "isoformat") else str(v["created_at"]),
+            }
+            for ts, v in self._store.items()
+        ]
+
     def cleanup_expired(self, ttl_hours: int = 24) -> int:
         """TTL 만료된 매핑 정리.
 

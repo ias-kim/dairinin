@@ -21,10 +21,12 @@ from typing import Optional
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from fastmcp import Client
 
+from db.email_log import get_email_log_store
 from graph.orchestrator import build_graph
 from mcp_servers.gmail_mcp import mcp as gmail_mcp
 from mcp_servers.slack_mcp import mcp as slack_mcp
@@ -115,6 +117,10 @@ async def route_email(email: dict) -> None:
         await asyncio.to_thread(process_single_email, email)
         return
 
+    log = get_email_log_store()
+    subject = email.get("subject", "")
+    sender = email.get("from", "")
+
     if category == "spam":
         logger.info(f"  → SPAM: archiving {email_id}")
         try:
@@ -122,6 +128,7 @@ async def route_email(email: dict) -> None:
                 await client.call_tool("archive_email", {"email_id": email_id})
         except Exception as e:
             logger.warning(f"archive failed: {e}")
+        log.log(email_id, subject, sender, category="spam", action="archived")
 
     elif category == "newsletter":
         logger.info(f"  → NEWSLETTER: labeling {email_id}")
@@ -130,6 +137,7 @@ async def route_email(email: dict) -> None:
                 await client.call_tool("add_label", {"email_id": email_id, "label_name": "NEWSLETTER"})
         except Exception as e:
             logger.warning(f"add_label failed: {e}")
+        log.log(email_id, subject, sender, category="newsletter", action="labeled")
 
     elif category == "important":
         logger.info(f"  → IMPORTANT: Slack 알림 {email_id}")
@@ -139,18 +147,23 @@ async def route_email(email: dict) -> None:
                 async with Client(slack_mcp) as client:
                     await client.call_tool("send_reply_notification_tool", {
                         "channel": slack_channel,
-                        "subject": email.get("subject", ""),
-                        "sender": email.get("from", ""),
+                        "subject": subject,
+                        "sender": sender,
                     })
             except Exception as e:
                 logger.warning(f"Slack notification failed: {e}")
+        log.log(email_id, subject, sender, category="important", action="notified")
 
     elif category == "calendar":
         logger.info(f"  → CALENDAR: pipeline {email_id}")
-        await asyncio.to_thread(process_single_email, email)
+        result = await asyncio.to_thread(process_single_email, email)
+        action = (result or {}).get("action", "pipeline")
+        confidence = (result or {}).get("confidence")
+        log.log(email_id, subject, sender, category="calendar", action=action, confidence=confidence)
 
     else:  # other
         logger.info(f"  → OTHER: skipping {email_id}")
+        log.log(email_id, subject, sender, category="other", action="skip")
 
 
 def process_single_email(email: dict) -> Optional[dict]:
@@ -257,6 +270,24 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="dairinin (代理人)", lifespan=lifespan)
+
+# CORS — Vercel 대시보드에서 호출 허용
+_DASHBOARD_ORIGIN = os.getenv("DASHBOARD_ORIGIN", "*")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[_DASHBOARD_ORIGIN] if _DASHBOARD_ORIGIN != "*" else ["*"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Authorization", "Content-Type"],
+)
+
+# 라우터 등록
+from routers import emails as emails_router
+from routers import hitl as hitl_router
+from routers import stats as stats_router
+
+app.include_router(emails_router.router)
+app.include_router(hitl_router.router)
+app.include_router(stats_router.router)
 
 
 @app.get("/health")
