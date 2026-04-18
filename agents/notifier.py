@@ -221,7 +221,11 @@ def _handle_hitl(state: ScheduleState):
                     f"Inserting HITL mapping: slack_ts={result['ts']!r} "
                     f"thread_id={thread_id!r} email_id={email_id!r}"
                 )
-                inserted = hitl.insert(result["ts"], thread_id, email_id)
+                inserted = hitl.insert(
+                    result["ts"], thread_id, email_id,
+                    subject=state.get("subject", ""),
+                    sender=state.get("sender", ""),
+                )
                 if inserted:
                     logger.info(
                         f"HITL mapping stored successfully: slack_ts={result['ts']!r} "

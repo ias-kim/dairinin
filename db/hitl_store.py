@@ -49,7 +49,7 @@ class HitlStore:
             logger.info("HitlStore: in-memory mode")
 
     def _setup_table(self):
-        """hitl_pending 테이블 생성 (없으면)."""
+        """hitl_pending 테이블 생성 (없으면) + 컬럼 마이그레이션."""
         with self._conn.cursor() as cur:
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS hitl_pending (
@@ -59,9 +59,12 @@ class HitlStore:
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
             """)
+            # subject/sender 컬럼 추가 (기존 테이블 마이그레이션)
+            cur.execute("ALTER TABLE hitl_pending ADD COLUMN IF NOT EXISTS subject TEXT DEFAULT ''")
+            cur.execute("ALTER TABLE hitl_pending ADD COLUMN IF NOT EXISTS sender  TEXT DEFAULT ''")
         self._conn.commit()
 
-    def insert(self, slack_ts: str, thread_id: str, email_id: str) -> bool:
+    def insert(self, slack_ts: str, thread_id: str, email_id: str, subject: str = "", sender: str = "") -> bool:
         """HITL 매핑 저장.
 
         Returns:
@@ -75,17 +78,19 @@ class HitlStore:
             with self._conn.cursor() as cur:
                 cur.execute(
                     """
-                    INSERT INTO hitl_pending (slack_ts, thread_id, email_id)
-                    VALUES (%s, %s, %s)
+                    INSERT INTO hitl_pending (slack_ts, thread_id, email_id, subject, sender)
+                    VALUES (%s, %s, %s, %s, %s)
                     ON CONFLICT (slack_ts) DO NOTHING
                     """,
-                    (slack_ts, thread_id, email_id),
+                    (slack_ts, thread_id, email_id, subject, sender),
                 )
             self._conn.commit()
         else:
             self._store[slack_ts] = {
                 "thread_id": thread_id,
                 "email_id": email_id,
+                "subject": subject,
+                "sender": sender,
                 "created_at": datetime.now(KST),
             }
         return True
@@ -133,7 +138,7 @@ class HitlStore:
         if self._use_postgres:
             with self._conn.cursor() as cur:
                 cur.execute(
-                    "SELECT slack_ts, thread_id, email_id, created_at FROM hitl_pending ORDER BY created_at DESC"
+                    "SELECT slack_ts, thread_id, email_id, subject, sender, created_at FROM hitl_pending ORDER BY created_at DESC"
                 )
                 rows = cur.fetchall()
             return [
@@ -141,7 +146,9 @@ class HitlStore:
                     "slack_ts": r[0],
                     "thread_id": r[1],
                     "email_id": r[2],
-                    "created_at": r[3].isoformat() if r[3] else None,
+                    "subject": r[3] or "",
+                    "sender": r[4] or "",
+                    "created_at": r[5].isoformat() if r[5] else None,
                 }
                 for r in rows
             ]
@@ -150,6 +157,8 @@ class HitlStore:
                 "slack_ts": ts,
                 "thread_id": v["thread_id"],
                 "email_id": v["email_id"],
+                "subject": v.get("subject", ""),
+                "sender": v.get("sender", ""),
                 "created_at": v["created_at"].isoformat() if hasattr(v["created_at"], "isoformat") else str(v["created_at"]),
             }
             for ts, v in self._store.items()
