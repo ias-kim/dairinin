@@ -10,10 +10,40 @@ import logging
 from datetime import datetime, timezone
 
 from graph.state import ScheduleState
+from mcp_servers.memory_mcp import MemoryStore
 
 logger = logging.getLogger(__name__)
 
 CONFIDENCE_THRESHOLD = 0.8
+CONFIDENCE_THRESHOLD_LEARNED = 0.6
+PATTERN_COUNT_THRESHOLD = 10
+
+_memory_store: MemoryStore | None = None
+
+
+def get_memory_store() -> MemoryStore:
+    global _memory_store
+    if _memory_store is None:
+        _memory_store = MemoryStore()
+    return _memory_store
+
+
+def _get_threshold(title: str) -> float:
+    """패턴 누적 횟수에 따라 threshold 동적 조정.
+
+    10회 이상 자동 승인된 패턴 → threshold 0.6으로 완화.
+    mem0 실패 시 기본값 0.8 유지.
+    """
+    if not title:
+        return CONFIDENCE_THRESHOLD
+    try:
+        count = get_memory_store().get_pattern_count("default", title)
+        if count >= PATTERN_COUNT_THRESHOLD:
+            logger.info(f"Learned pattern '{title}': count={count}, threshold → {CONFIDENCE_THRESHOLD_LEARNED}")
+            return CONFIDENCE_THRESHOLD_LEARNED
+    except Exception as e:
+        logger.warning(f"mem0 pattern lookup failed: {e}")
+    return CONFIDENCE_THRESHOLD
 
 
 def conflict_decision_node(state: ScheduleState) -> dict:
@@ -47,8 +77,9 @@ def conflict_decision_node(state: ScheduleState) -> dict:
     confidence = state.get("confidence", 0.0)
     conflicts = state.get("conflicts", [])
 
-    if confidence < CONFIDENCE_THRESHOLD:
-        logger.info(f"HITL: low confidence ({confidence})")
+    threshold = _get_threshold(parsed.title or "")
+    if confidence < threshold:
+        logger.info(f"HITL: low confidence ({confidence} < {threshold})")
         return {"action": "hitl_required"}
 
     if conflicts:
