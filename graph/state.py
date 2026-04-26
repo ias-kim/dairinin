@@ -65,3 +65,6 @@ class ScheduleState(TypedDict, total=False):
 
     # HITL 응답 (Week 2-3에서 추가)
     hitl_response: Optional[str]
+
+    # LangGraph checkpointer thread_id — HITL resume 시 올바른 그래프를 찾기 위해 state에도 보관
+    _thread_id: Optional[str]
