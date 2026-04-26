@@ -17,10 +17,10 @@ from langgraph.types import interrupt
 
 from db.hitl_store import HitlStore
 from graph.state import ScheduleState
-from mcp_servers.calendar_mcp import create_event_logic
-from mcp_servers.gmail_mcp import mark_read_logic, send_reply_logic
+from mcp_servers.calendar_mcp import build_calendar_service, create_event_logic
+from mcp_servers.gmail_mcp import build_gmail_service, mark_read_logic, send_reply_logic
 from mcp_servers.memory_mcp import MemoryStore
-from mcp_servers.slack_mcp import send_hitl_message, send_reply_notification
+from mcp_servers.slack_mcp import build_slack_client, send_hitl_message, send_reply_notification
 
 logger = logging.getLogger(__name__)
 
@@ -83,10 +83,13 @@ def _do_send_reply_and_notify(state: ScheduleState):
         return
 
     # Gmail 답장
+    service = None
     try:
-        from mcp_servers.gmail_mcp import build_gmail_service
-
         service = build_gmail_service()
+    except Exception as e:
+        logger.warning(f"build_gmail_service failed for reply: {e}")
+
+    try:
         title = parsed.title if parsed else subject
         dt_str = str(parsed.event_datetime) if parsed and parsed.event_datetime else ""
         body = f"안녕하세요,\n\n일정이 등록되었습니다.\n{title}" + (f" ({dt_str})" if dt_str else "") + "\n\n감사합니다."
@@ -99,10 +102,13 @@ def _do_send_reply_and_notify(state: ScheduleState):
     if not slack_channel:
         return
 
+    client = None
     try:
-        from mcp_servers.slack_mcp import build_slack_client
-
         client = build_slack_client()
+    except Exception as e:
+        logger.warning(f"build_slack_client failed for notification: {e}")
+
+    try:
         send_reply_notification(client, slack_channel, subject or (parsed.title if parsed else ""), sender)
     except Exception as e:
         logger.warning(f"send_reply_notification skipped: {e}")
@@ -112,9 +118,13 @@ def _do_mark_read(email_id: str):
     """이메일 읽음 처리 (공통)."""
     if not email_id:
         return
+    service = None
     try:
-        from mcp_servers.gmail_mcp import build_gmail_service
         service = build_gmail_service()
+    except Exception as e:
+        logger.warning(f"build_gmail_service failed for mark_read: {e}")
+
+    try:
         mark_read_logic(service, email_id)
     except Exception as e:
         logger.warning(f"mark_read skipped: {e}")
@@ -134,9 +144,9 @@ def _handle_auto_register(state: ScheduleState):
         end_dt = dt + timedelta(minutes=duration)
 
         try:
-            from mcp_servers.calendar_mcp import build_calendar_service
             service = build_calendar_service()
-        except Exception:
+        except Exception as e:
+            logger.warning(f"build_calendar_service failed for create_event: {e}")
             service = None
 
         result = create_event_logic(
@@ -186,7 +196,6 @@ def _handle_hitl(state: ScheduleState):
     slack_channel = os.getenv("SLACK_CHANNEL_ID", "")
     if slack_channel:
         try:
-            from mcp_servers.slack_mcp import build_slack_client
             client = build_slack_client()
 
             conflict_names = [c.get("summary", "Unknown") for c in conflicts]

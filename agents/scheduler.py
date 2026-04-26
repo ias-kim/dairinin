@@ -46,6 +46,11 @@ def schedule_check_node(state: ScheduleState) -> dict:
 
     try:
         service = build_calendar_service()
+    except Exception as e:
+        logger.warning(f"Calendar service build failed: {e}")
+        service = None
+
+    try:
         existing = get_events_logic(service, date_str)
         conflicts = check_conflicts_logic(existing, start_str, end_str)
     except Exception as e:
