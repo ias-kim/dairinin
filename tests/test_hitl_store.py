@@ -97,3 +97,41 @@ class TestHitlStorePostgres:
             # 인메모리로 정상 동작
             store.insert("1111", "thread-1", "msg_1")
             assert store.lookup_by_slack_ts("1111")["thread_id"] == "thread-1"
+
+    def test_reconnects_when_connection_closed(self):
+        """연결이 끊기면 자동으로 재연결 후 작업이 성공해야 한다.
+
+        시나리오: Railway idle timeout → conn.closed == True
+        → 다음 insert() 호출 시 재연결해야 함.
+        """
+        with patch("db.hitl_store.psycopg") as mock_psycopg:
+            # 첫 번째 연결 (초기화용)
+            first_conn = MagicMock()
+            first_conn.closed = False
+            first_conn.cursor.return_value.__enter__ = MagicMock(return_value=MagicMock())
+            first_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+
+            # 두 번째 연결 (재연결용)
+            second_conn = MagicMock()
+            second_conn.closed = False
+            mock_cursor = MagicMock()
+            mock_cursor.fetchone.return_value = None  # is_email_pending → False
+            second_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
+            second_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+
+            mock_psycopg.connect.side_effect = [first_conn, second_conn]
+
+            store = HitlStore(database_url="postgresql://test/db")
+            assert store._use_postgres is True
+
+            # idle timeout 시뮬레이션: 연결 끊김
+            first_conn.closed = True
+
+            # 재연결 없이 insert하면 실패해야 하는 상황 → _ensure_conn()이 있으면 성공
+            store.insert("1234.5", "thread-1", "msg_reconnect")
+
+        # psycopg.connect가 2회 호출되어야 함 (초기 1 + 재연결 1)
+        assert mock_psycopg.connect.call_count == 2, (
+            f"connect 호출 횟수: {mock_psycopg.connect.call_count}. "
+            "연결 끊김 후 재연결을 시도하지 않습니다."
+        )

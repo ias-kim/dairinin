@@ -104,6 +104,54 @@ class TestNotifierHitl:
 
         mock_int.assert_called_once()
 
+    def test_hitl_uses_state_thread_id_for_mapping(self):
+        """_thread_id가 state에 있으면 그 값으로 hitl.insert() 호출.
+
+        버그 재현: state에 _thread_id 없으면 notifier가 uuid를 새로 생성 →
+        app.py의 config thread_id와 다른 값이 DB에 저장 → resume 실패.
+        """
+        from agents.notifier import _handle_hitl
+        from datetime import datetime, timedelta, timezone
+
+        _FUTURE = datetime.now(timezone.utc) + timedelta(days=7)
+        parsed = EventJSON(title="중요 미팅", event_datetime=_FUTURE)
+        expected_thread_id = "fixed-thread-id-from-app"
+
+        mock_hitl = MagicMock()
+        mock_hitl.is_email_pending.return_value = False
+        mock_hitl.insert.return_value = True
+
+        mock_client = MagicMock()
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+        mock_client.send_hitl_message.return_value = {"ts": "1234567890.123456"}
+
+        with (
+            patch("agents.notifier.get_hitl_store", return_value=mock_hitl),
+            patch("agents.notifier.send_hitl_message", return_value={"ts": "1234567890.123456"}),
+            patch("mcp_servers.slack_mcp.build_slack_client", return_value=MagicMock()),
+            patch.dict("os.environ", {"SLACK_CHANNEL_ID": "C_TEST"}),
+            patch("agents.notifier.interrupt", side_effect=Exception("interrupted")),
+        ):
+            try:
+                _handle_hitl({
+                    "email_id": "msg_hitl",
+                    "parsed_event": parsed,
+                    "confidence": 0.65,
+                    "conflicts": [],
+                    "_thread_id": expected_thread_id,
+                })
+            except Exception:
+                pass
+
+        # hitl.insert()의 두 번째 인자(thread_id)가 state의 _thread_id여야 함
+        call_args = mock_hitl.insert.call_args
+        actual_thread_id = call_args[0][1]  # positional: (slack_ts, thread_id, email_id, ...)
+        assert actual_thread_id == expected_thread_id, (
+            f"thread_id mismatch: expected {expected_thread_id!r}, got {actual_thread_id!r}\n"
+            "이 버그가 있으면 HITL resume이 잘못된 그래프 스레드를 찾습니다."
+        )
+
     def test_hitl_resume_approve_creates_event(self):
         """interrupt에서 resume + approve → auto_register 실행."""
         from agents.notifier import notify_node
