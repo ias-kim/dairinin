@@ -33,6 +33,7 @@ class HitlStore:
         url = database_url or os.getenv("DATABASE_URL")
 
         self._use_postgres: bool = False
+        self._url: Optional[str] = url
         self._conn: Optional[Any] = None
         self._store: dict[str, dict] = {}
 
@@ -47,6 +48,12 @@ class HitlStore:
                 self._use_postgres = False
         else:
             logger.info("HitlStore: in-memory mode")
+
+    def _ensure_conn(self) -> None:
+        """연결이 끊겼으면 재연결. idle timeout 방어."""
+        if self._conn is not None and self._conn.closed and self._url and psycopg:
+            logger.info("HitlStore: reconnecting to PostgreSQL")
+            self._conn = psycopg.connect(self._url)
 
     def _setup_table(self):
         """hitl_pending 테이블 생성 (없으면) + 컬럼 마이그레이션."""
@@ -75,6 +82,7 @@ class HitlStore:
             return False
 
         if self._use_postgres:
+            self._ensure_conn()
             with self._conn.cursor() as cur:
                 cur.execute(
                     """
@@ -98,6 +106,7 @@ class HitlStore:
     def lookup_by_slack_ts(self, slack_ts: str) -> Optional[dict]:
         """Slack message_ts로 thread_id 조회."""
         if self._use_postgres:
+            self._ensure_conn()
             with self._conn.cursor() as cur:
                 cur.execute(
                     "SELECT thread_id, email_id, created_at FROM hitl_pending WHERE slack_ts = %s",
@@ -112,6 +121,7 @@ class HitlStore:
     def remove(self, slack_ts: str) -> bool:
         """처리 완료된 매핑 삭제."""
         if self._use_postgres:
+            self._ensure_conn()
             with self._conn.cursor() as cur:
                 cur.execute("DELETE FROM hitl_pending WHERE slack_ts = %s", (slack_ts,))
                 deleted = cur.rowcount
@@ -125,6 +135,7 @@ class HitlStore:
     def is_email_pending(self, email_id: str) -> bool:
         """이미 HITL 대기 중인 이메일인지 확인 (dedup guard)."""
         if self._use_postgres:
+            self._ensure_conn()
             with self._conn.cursor() as cur:
                 cur.execute(
                     "SELECT 1 FROM hitl_pending WHERE email_id = %s LIMIT 1",
@@ -136,6 +147,7 @@ class HitlStore:
     def list_pending(self) -> list[dict]:
         """대기 중인 HITL 목록 전체 반환."""
         if self._use_postgres:
+            self._ensure_conn()
             with self._conn.cursor() as cur:
                 cur.execute(
                     "SELECT slack_ts, thread_id, email_id, subject, sender, created_at FROM hitl_pending ORDER BY created_at DESC"
@@ -170,6 +182,7 @@ class HitlStore:
         Returns: 삭제된 건수
         """
         if self._use_postgres:
+            self._ensure_conn()
             with self._conn.cursor() as cur:
                 cur.execute(
                     "DELETE FROM hitl_pending WHERE created_at < NOW() - INTERVAL '%s hours'",

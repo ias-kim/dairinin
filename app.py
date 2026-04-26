@@ -31,6 +31,7 @@ from graph.orchestrator import build_graph
 from mcp_servers.gmail_mcp import mcp as gmail_mcp
 from mcp_servers.slack_mcp import mcp as slack_mcp
 from utils.email_classifier import classify_email
+from utils.event_detector import should_process_email
 
 load_dotenv()
 
@@ -42,6 +43,16 @@ POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "15"))
 # 동시 실행 방지 플래그
 _processing = False
 
+# 그래프 싱글톤 — 앱 생애 동안 1회만 빌드 (PostgreSQL 연결 재사용)
+_graph_instance = None
+
+
+def get_graph():
+    global _graph_instance
+    if _graph_instance is None:
+        _graph_instance = build_graph()
+    return _graph_instance
+
 # ──────────────────────────────────────────────
 # 이메일 중복 처리 방지
 # ──────────────────────────────────────────────
@@ -50,7 +61,13 @@ _processed_emails: set[str] = set()
 
 
 def is_already_processed(email_id: str) -> bool:
-    return email_id in _processed_emails
+    if email_id in _processed_emails:
+        return True
+    # 재시작 후 인메모리 캐시가 소실된 경우 DB에서 확인
+    try:
+        return get_email_log_store().is_processed(email_id)
+    except Exception:
+        return False
 
 
 def mark_processed(email_id: str) -> None:
@@ -60,6 +77,15 @@ def mark_processed(email_id: str) -> None:
 def reset_processed_emails() -> None:
     """테스트용 초기화."""
     _processed_emails.clear()
+
+
+def warn_if_slack_secret_missing() -> None:
+    """앱 시작 시 SLACK_SIGNING_SECRET 미설정 여부 경고."""
+    if not os.getenv("SLACK_SIGNING_SECRET"):
+        logger.warning(
+            "SLACK_SIGNING_SECRET is not set — Slack webhook signature verification is DISABLED. "
+            "Anyone can send requests to /webhook/slack. Set this env var in production."
+        )
 
 
 # ──────────────────────────────────────────────
@@ -114,7 +140,11 @@ async def route_email(email: dict) -> None:
         category = classify_email(text)
     except Exception as e:
         logger.warning(f"EmailClassifier failed for {email_id}, falling back to pipeline: {e}")
-        await asyncio.to_thread(process_single_email, email)
+        # 폴백 시 should_process_email()로 1차 필터 — 일정 없는 이메일은 LLM 비용 낭비 방지
+        if should_process_email(text):
+            await asyncio.to_thread(process_single_email, email)
+        else:
+            logger.info(f"Fallback: no schedule content in {email_id}, skipping pipeline")
         return
 
     log = get_email_log_store()
@@ -179,13 +209,14 @@ def process_single_email(email: dict) -> Optional[dict]:
 
     try:
         thread_id = str(uuid.uuid4())
-        graph = build_graph()
+        graph = get_graph()
         result = graph.invoke(
             {
                 "email_id": email["id"],
                 "raw_email": email.get("snippet", ""),
                 "subject": email.get("subject", ""),
                 "sender": email.get("from", ""),
+                "_thread_id": thread_id,
             },
             config={"configurable": {"thread_id": thread_id}},
         )
@@ -263,6 +294,7 @@ async def lifespan(app: FastAPI):
     앱 종료 시 task 취소.
     """
     logger.info(f"dairinin starting (poll every {POLL_INTERVAL}s)")
+    warn_if_slack_secret_missing()
     task = asyncio.create_task(poll_gmail_loop())
     yield
     task.cancel()
@@ -389,14 +421,13 @@ async def slack_interact(request: Request):
             })
 
         if action_id == "hitl_approve":
-            # 백그라운드에서 LangGraph resume (3초 타임아웃 방지)
-            asyncio.create_task(asyncio.to_thread(_resume_hitl, message_ts, "approve"))
+            _schedule_hitl_resume(message_ts, "approve")
             return JSONResponse({
                 "replace_original": True,
                 "text": f"✅ 등록 완료: {value.get('email_id', '')}",
             })
         elif action_id == "hitl_reject":
-            asyncio.create_task(asyncio.to_thread(_resume_hitl, message_ts, "reject"))
+            _schedule_hitl_resume(message_ts, "reject")
             return JSONResponse({
                 "replace_original": True,
                 "text": f"❌ 무시됨: {value.get('email_id', '')}",
@@ -426,11 +457,22 @@ def _resume_hitl(slack_ts: str, decision: str):
     logger.info(f"HITL resume: {decision} for email_id={email_id}")
 
     try:
+        # Resume는 fresh graph로 수행해서 stale checkpointer 연결 영향을 줄인다.
         graph = build_graph()
         graph.invoke(
             Command(resume=decision, update={"hitl_response": decision}),
             config={"configurable": {"thread_id": thread_id}},
         )
         hitl.remove(slack_ts)
+        logger.info(f"HITL resume completed: {decision} for email_id={email_id}")
     except Exception as e:
         logger.error(f"HITL resume failed: {e}")
+
+
+def _schedule_hitl_resume(slack_ts: str, decision: str) -> None:
+    """백그라운드에서 HITL resume 실행.
+
+    예외가 request lifecycle 밖으로 사라지지 않도록 wrapper에서 시작 로그를 남긴다.
+    """
+    logger.info(f"HITL resume scheduled: {decision} for slack_ts={slack_ts}")
+    asyncio.create_task(asyncio.to_thread(_resume_hitl, slack_ts, decision))
