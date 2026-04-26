@@ -102,3 +102,109 @@ class TestConflictAgent:
         })
 
         assert result["action"] == "skip"
+
+
+class TestConflictAgentMemoryThreshold:
+    """mem0 패턴 학습 기반 threshold 동적 조정 테스트."""
+
+    def test_auto_register_when_frequent_pattern(self):
+        """패턴 10회 이상 → threshold 0.6, confidence=0.7 → auto_register."""
+        from unittest.mock import MagicMock, patch
+        from agents.conflict import conflict_decision_node
+
+        mock_store = MagicMock()
+        mock_store.get_pattern_count.return_value = 10
+
+        with patch("agents.conflict.get_memory_store", return_value=mock_store):
+            result = conflict_decision_node({
+                "parsed_event": EventJSON(title="팀미팅", event_datetime=_FUTURE),
+                "confidence": 0.7,
+                "conflicts": [],
+            })
+
+        assert result["action"] == "auto_register"
+
+    def test_hitl_when_few_patterns(self):
+        """패턴 9회 이하 → threshold 0.8 유지, confidence=0.7 → hitl_required."""
+        from unittest.mock import MagicMock, patch
+        from agents.conflict import conflict_decision_node
+
+        mock_store = MagicMock()
+        mock_store.get_pattern_count.return_value = 9
+
+        with patch("agents.conflict.get_memory_store", return_value=mock_store):
+            result = conflict_decision_node({
+                "parsed_event": EventJSON(title="팀미팅", event_datetime=_FUTURE),
+                "confidence": 0.7,
+                "conflicts": [],
+            })
+
+        assert result["action"] == "hitl_required"
+
+    def test_default_threshold_when_mem0_fails(self):
+        """mem0 예외 발생 시 기본 threshold 0.8 사용 → confidence=0.7 → hitl_required."""
+        from unittest.mock import MagicMock, patch
+        from agents.conflict import conflict_decision_node
+
+        mock_store = MagicMock()
+        mock_store.get_pattern_count.side_effect = Exception("mem0 unavailable")
+
+        with patch("agents.conflict.get_memory_store", return_value=mock_store):
+            result = conflict_decision_node({
+                "parsed_event": EventJSON(title="팀미팅", event_datetime=_FUTURE),
+                "confidence": 0.7,
+                "conflicts": [],
+            })
+
+        assert result["action"] == "hitl_required"
+
+    def test_frequent_pattern_still_hitl_when_conflict_exists(self):
+        """패턴 많아도 충돌 있으면 hitl_required."""
+        from unittest.mock import MagicMock, patch
+        from agents.conflict import conflict_decision_node
+
+        mock_store = MagicMock()
+        mock_store.get_pattern_count.return_value = 20
+
+        with patch("agents.conflict.get_memory_store", return_value=mock_store):
+            result = conflict_decision_node({
+                "parsed_event": EventJSON(title="팀미팅", event_datetime=_FUTURE),
+                "confidence": 0.9,
+                "conflicts": [{"summary": "기존 일정", "id": "evt_1"}],
+            })
+
+        assert result["action"] == "hitl_required"
+
+    def test_boundary_at_learned_threshold_is_auto_register(self):
+        """confidence 정확히 0.6 + count≥10 → auto_register (threshold 이상)."""
+        from unittest.mock import MagicMock, patch
+        from agents.conflict import conflict_decision_node
+
+        mock_store = MagicMock()
+        mock_store.get_pattern_count.return_value = 10
+
+        with patch("agents.conflict.get_memory_store", return_value=mock_store):
+            result = conflict_decision_node({
+                "parsed_event": EventJSON(title="팀미팅", event_datetime=_FUTURE),
+                "confidence": 0.6,
+                "conflicts": [],
+            })
+
+        assert result["action"] == "auto_register"
+
+    def test_boundary_below_learned_threshold_is_hitl(self):
+        """confidence 0.59 + count≥10 → hitl_required (threshold 미만)."""
+        from unittest.mock import MagicMock, patch
+        from agents.conflict import conflict_decision_node
+
+        mock_store = MagicMock()
+        mock_store.get_pattern_count.return_value = 10
+
+        with patch("agents.conflict.get_memory_store", return_value=mock_store):
+            result = conflict_decision_node({
+                "parsed_event": EventJSON(title="팀미팅", event_datetime=_FUTURE),
+                "confidence": 0.59,
+                "conflicts": [],
+            })
+
+        assert result["action"] == "hitl_required"

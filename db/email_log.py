@@ -28,6 +28,7 @@ class EmailLogStore:
         url = database_url or os.getenv("DATABASE_URL")
 
         self._use_postgres: bool = False
+        self._url: Optional[str] = url
         self._conn: Optional[Any] = None
         self._store: list[dict] = []
 
@@ -41,6 +42,12 @@ class EmailLogStore:
                 logger.warning(f"EmailLogStore: DB connect failed, falling back to in-memory: {e}")
         else:
             logger.info("EmailLogStore: in-memory mode")
+
+    def _ensure_conn(self) -> None:
+        """연결이 끊겼으면 재연결. idle timeout 방어."""
+        if self._conn is not None and self._conn.closed and self._url and psycopg:
+            logger.info("EmailLogStore: reconnecting to PostgreSQL")
+            self._conn = psycopg.connect(self._url)
 
     def _setup_table(self):
         with self._conn.cursor() as cur:
@@ -56,6 +63,9 @@ class EmailLogStore:
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
             """)
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_email_logs_email_id ON email_logs (email_id)"
+            )
         self._conn.commit()
 
     def log(
@@ -68,6 +78,7 @@ class EmailLogStore:
         confidence: float | None = None,
     ) -> None:
         if self._use_postgres:
+            self._ensure_conn()
             with self._conn.cursor() as cur:
                 cur.execute(
                     """
@@ -91,6 +102,7 @@ class EmailLogStore:
 
     def list_logs(self, limit: int = 50, offset: int = 0) -> list[dict]:
         if self._use_postgres:
+            self._ensure_conn()
             with self._conn.cursor() as cur:
                 cur.execute(
                     """
@@ -117,8 +129,24 @@ class EmailLogStore:
             ]
         return list(reversed(self._store))[offset : offset + limit]
 
+    def is_processed(self, email_id: str) -> bool:
+        """이미 처리된 이메일인지 확인.
+
+        컨테이너 재시작 후 in-memory 캐시가 소실되어도 DB가 있으면 True 반환.
+        """
+        if self._use_postgres:
+            self._ensure_conn()
+            with self._conn.cursor() as cur:
+                cur.execute(
+                    "SELECT 1 FROM email_logs WHERE email_id = %s LIMIT 1",
+                    (email_id,),
+                )
+                return cur.fetchone() is not None
+        return any(r["email_id"] == email_id for r in self._store)
+
     def get_stats(self) -> dict:
         if self._use_postgres:
+            self._ensure_conn()
             with self._conn.cursor() as cur:
                 cur.execute("SELECT COUNT(*) FROM email_logs")
                 total = cur.fetchone()[0]
