@@ -55,6 +55,9 @@ def parse_with_llm(
     """
     from langchain_openai import ChatOpenAI
 
+    logger.info(f"Parser input: subject='{subject}', sender='{sender}'")
+    logger.debug(f"Parser raw_email snippet: {raw_email[:200]}...")  # First 200 chars
+
     llm = ChatOpenAI(
         model="gpt-4o-mini",
         temperature=0,
@@ -67,17 +70,25 @@ Subject: {subject}
 
 {raw_email}"""
 
-    result = structured_llm.invoke(
-        [
-            {"role": "system", "content": PARSER_SYSTEM_PROMPT},
-            {"role": "user", "content": user_message},
-        ]
-    )
+    logger.debug(f"Parser user_message: {user_message[:300]}...")  # First 300 chars
 
-    if result and (result.title or result.event_datetime):
-        return result
+    try:
+        result = structured_llm.invoke(
+            [
+                {"role": "system", "content": PARSER_SYSTEM_PROMPT},
+                {"role": "user", "content": user_message},
+            ]
+        )
 
-    return None
+        logger.info(f"Parser result: title='{result.title if result else None}', datetime='{result.event_datetime if result else None}'")
+
+        if result and (result.title or result.event_datetime):
+            return result
+
+        return None
+    except Exception as e:
+        logger.error(f"Parser LLM call failed: {e}", exc_info=True)
+        return None
 
 
 def parse_email_node(state: ScheduleState) -> dict:
@@ -88,6 +99,8 @@ def parse_email_node(state: ScheduleState) -> dict:
     3. compute_confidence() → float
     4. state 업데이트 반환
     """
+    email_id = state.get("email_id", "unknown")
+
     try:
         parsed_event = parse_with_llm(
             raw_email=state.get("raw_email", ""),
@@ -95,13 +108,15 @@ def parse_email_node(state: ScheduleState) -> dict:
             sender=state.get("sender", ""),
         )
     except Exception as e:
-        logger.error(f"Parser failed for {state.get('email_id')}: {e}")
+        logger.error(f"Parser failed for {email_id}: {e}")
         parsed_event = None
 
     if parsed_event:
         confidence = compute_confidence(parsed_event)
+        logger.info(f"Parser node result for {email_id}: title='{parsed_event.title}', datetime='{parsed_event.event_datetime}', confidence={confidence}")
     else:
         confidence = 0.0
+        logger.info(f"Parser node result for {email_id}: no event parsed")
 
     return {
         "parsed_event": parsed_event,
