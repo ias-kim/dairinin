@@ -230,6 +230,32 @@ class TestSendReply:
 
         assert result is False
 
+    def test_display_name_format_is_normalized(self):
+        """'"이름" <email>' 형식의 To 주소를 이메일만 추출해야 한다.
+
+        Gmail API가 '"김성관" <abc@naver.com>' 형식을 To 헤더로 받으면
+        Invalid To header 에러를 반환한다. 이메일 주소만 추출해서 보내야 한다.
+        """
+        import email as email_lib
+
+        mock_service = MagicMock()
+        mock_service.users().messages().send().execute.return_value = {"id": "sent_1"}
+
+        send_reply_logic(
+            mock_service,
+            "thread_abc",
+            "내용",
+            '"김성관" <abcqkdnxm@naver.com>',
+        )
+
+        raw_b64 = mock_service.users().messages().send.call_args[1]["body"]["raw"]
+        import base64
+        raw_bytes = base64.urlsafe_b64decode(raw_b64 + "==")
+        msg = email_lib.message_from_bytes(raw_bytes)
+        assert msg["to"] == "abcqkdnxm@naver.com", (
+            f"To 헤더가 이메일 주소만이어야 합니다. 실제: {msg['to']}"
+        )
+
 
 class TestArchiveEmail:
     """archive_email_logic 테스트."""

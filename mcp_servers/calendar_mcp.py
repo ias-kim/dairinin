@@ -227,7 +227,9 @@ def create_event_logic(
     if description:
         event_body["description"] = description
     if attendees:
-        event_body["attendees"] = [{"email": a} for a in attendees]
+        from email.utils import parseaddr
+        cleaned = [parseaddr(a)[1] or a for a in attendees]
+        event_body["attendees"] = [{"email": a} for a in cleaned if a]
 
     # DRY_RUN: 로그만 남기고 실제 API 호출 안 함
     if dry_run:

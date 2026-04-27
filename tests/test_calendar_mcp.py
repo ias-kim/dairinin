@@ -258,3 +258,31 @@ class TestCreateEvent:
 
         assert result["status"] == "error"
         assert "403" in result["error"]
+
+    def test_attendee_with_display_name_is_normalized(self):
+        """attendees에 '"이름" <email>' 형식이 들어오면 이메일만 추출해야 한다.
+
+        LLM이 attendees를 '"김성관" <abc@naver.com>' 형식으로 파싱하면
+        Google Calendar API가 Invalid attendee email 에러를 반환한다.
+        """
+        mock_service = MagicMock()
+        mock_service.events().insert().execute.return_value = {
+            "id": "evt_1",
+            "summary": "면접",
+            "htmlLink": "https://calendar.google.com/event?eid=xxx",
+        }
+
+        create_event_logic(
+            mock_service,
+            summary="면접",
+            start="2026-05-08T14:00:00+09:00",
+            end="2026-05-08T15:00:00+09:00",
+            attendees=['"김성관" <abcqkdnxm@naver.com>'],
+            dry_run=False,
+        )
+
+        call_body = mock_service.events().insert.call_args[1]["body"]
+        attendee_emails = [a["email"] for a in call_body.get("attendees", [])]
+        assert attendee_emails == ["abcqkdnxm@naver.com"], (
+            f"이메일 주소만 남아야 합니다. 실제: {attendee_emails}"
+        )

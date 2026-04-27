@@ -198,10 +198,12 @@ def send_reply_logic(service: Any, thread_id: str, body: str, to: str) -> bool:
     """
     import base64
     from email.mime.text import MIMEText
+    from email.utils import parseaddr
 
     try:
+        _, addr = parseaddr(to)
         message = MIMEText(body)
-        message["to"] = to
+        message["to"] = addr or to
         raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
 
         service.users().messages().send(
