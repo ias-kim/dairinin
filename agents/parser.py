@@ -16,6 +16,7 @@ gmail-mcp가 가져온 이메일을 LLM으로 파싱해서 구조화된 이벤�
 from __future__ import annotations
 
 import logging
+from datetime import date
 from typing import Optional
 
 from graph.state import ScheduleState
@@ -25,6 +26,8 @@ from utils.models import EventJSON
 logger = logging.getLogger(__name__)
 
 PARSER_SYSTEM_PROMPT = """You are an email parser that extracts calendar event information.
+
+Current date: {current_date}
 
 Given an email, extract the following if present:
 - title: event name or meeting topic
@@ -36,10 +39,12 @@ Given an email, extract the following if present:
 
 If the email does NOT contain a calendar event or meeting request, return null for all fields.
 
-Important:
-- For relative dates like "next Tuesday", use the current date as reference.
-- If time is ambiguous, leave event_datetime as null.
-- Only extract events the sender is proposing/requesting, not past events being referenced.
+Important date parsing rules:
+- For dates without explicit year (e.g., "4月17日", "April 17"), assume the current year ({current_year})
+- For relative dates like "next Tuesday", calculate from the current date ({current_date})
+- If time is ambiguous, leave event_datetime as null
+- Only extract events the sender is proposing/requesting, not past events being referenced
+- For reply-chain emails (Re: or Fwd: in subject): only extract dates from the NEWEST message at the top. Ignore quoted/historical thread content that appears after "On ... wrote:", "-----Original Message-----", or similar reply markers.
 """
 
 
@@ -62,17 +67,34 @@ def parse_with_llm(
 
     structured_llm = llm.with_structured_output(EventJSON)
 
+    today = date.today()
+    system_prompt = PARSER_SYSTEM_PROMPT.format(
+        current_date=today.isoformat(),
+        current_year=today.year,
+    )
+
+    logger.info(f"Parser input: subject='{subject}', sender='{sender}'")
+    logger.debug(f"Parser raw_email: {raw_email[:200]}")
+
     user_message = f"""From: {sender}
 Subject: {subject}
 
 {raw_email}"""
 
-    result = structured_llm.invoke(
-        [
-            {"role": "system", "content": PARSER_SYSTEM_PROMPT},
-            {"role": "user", "content": user_message},
-        ]
-    )
+    try:
+        result = structured_llm.invoke(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ]
+        )
+        logger.info(
+            f"Parser result: title='{result.title if result else None}', "
+            f"datetime='{result.event_datetime if result else None}'"
+        )
+    except Exception as e:
+        logger.error(f"Parser LLM call failed: {e}", exc_info=True)
+        return None
 
     if result and (result.title or result.event_datetime):
         return result

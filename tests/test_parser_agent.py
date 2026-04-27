@@ -18,8 +18,8 @@ Parser Agent의 역할:
     실제 LLM 품질 테스트는 나중에 eval로 별도 수행.
 """
 
-from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import datetime, date
+from unittest.mock import AsyncMock, MagicMock, patch, call
 
 import pytest
 
@@ -105,6 +105,57 @@ class TestParserAgent:
 
         assert result["parsed_event"] is not None
         assert result["confidence"] < 0.8  # datetime 누락 → HITL
+
+    def test_prompt_contains_current_date(self):
+        """parse_with_llm 호출 시 시스템 프롬프트에 오늘 날짜가 포함되어야 한다.
+
+        Re: Re: 이메일 스레드에서 과거 날짜(2024-05-08)를 잘못 추출하는 근본 원인:
+        LLM이 '지금'이 언제인지 몰라서 이메일에 명시된 날짜를 그대로 쓴다.
+        """
+        from agents.parser import parse_with_llm
+
+        captured_messages = []
+
+        class MockStructuredLLM:
+            def invoke(self, messages):
+                captured_messages.extend(messages)
+                return EventJSON(title="面接", event_datetime=datetime(2026, 5, 8, 14, 0))
+
+        mock_llm = MagicMock()
+        mock_llm.with_structured_output.return_value = MockStructuredLLM()
+
+        today = date.today().isoformat()
+
+        with patch("langchain_openai.ChatOpenAI", return_value=mock_llm):
+            parse_with_llm(
+                raw_email="Re: 一次面接のご案内 (2024-05-08 14:00)",
+                subject="Re: Re: 【Finatextグループ】次のステップのご案内",
+            )
+
+        system_messages = [m for m in captured_messages if m.get("role") == "system"]
+        assert system_messages, "시스템 메시지가 없습니다"
+        assert today in system_messages[0]["content"], (
+            f"시스템 프롬프트에 오늘 날짜({today})가 없습니다"
+        )
+
+    def test_prompt_has_reply_chain_instruction(self):
+        """프롬프트에 답장 스레드 처리 지시가 포함되어야 한다.
+
+        Re: Re: 이메일의 인용된 과거 내용에서 날짜를 추출하지 않도록
+        LLM에게 명시적으로 지시해야 한다.
+        """
+        from agents.parser import PARSER_SYSTEM_PROMPT
+
+        lower = PARSER_SYSTEM_PROMPT.lower()
+        has_reply_instruction = (
+            "quoted" in lower
+            or "reply" in lower
+            or "thread" in lower
+            or "re:" in lower
+        )
+        assert has_reply_instruction, (
+            "프롬프트에 답장 스레드(quoted/reply/thread) 처리 지시가 없습니다"
+        )
 
     def test_handles_llm_error(self):
         """LLM 호출 실패 → graceful degradation.
