@@ -52,10 +52,16 @@ class MemoryStore:
 
     def _init_mem0(self):
         """mem0 클라이언트 초기화."""
+        api_url = os.getenv("MEM0_API_URL")
+        if not api_url:
+            logger.info("MEM0_API_URL not set, skipping mem0 initialization")
+            self._use_mem0 = False
+            self._store: dict[str, list[dict]] = defaultdict(list)
+            return
+
         try:
             from mem0 import MemoryClient
 
-            api_url = os.getenv("MEM0_API_URL", "http://localhost:8888")
             self._mem0 = MemoryClient(api_key="local", host=api_url)
             logger.info(f"mem0 connected: {api_url}")
         except Exception as e:
