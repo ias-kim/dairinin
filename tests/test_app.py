@@ -392,6 +392,38 @@ class TestResumeHitl:
         mock_hitl.remove.assert_not_called()
 
 
+class TestScheduleHitlResume:
+    """_schedule_hitl_resume — 태스크 GC 회귀 테스트.
+
+    asyncio.create_task() 반환값을 보관하지 않으면 Python 3.12에서 GC로
+    태스크가 실행 전에 수거된다. 이 테스트는 _resume_hitl이 실제로 실행되는지
+    확인한다.
+    """
+
+    @pytest.mark.asyncio
+    async def test_schedule_hitl_resume_actually_calls_resume_hitl(self):
+        """_schedule_hitl_resume 호출 후 _resume_hitl이 실제로 실행되어야 한다.
+
+        태스크 참조가 없으면 GC로 수거되어 실행되지 않는 버그를 검증한다.
+        """
+        import asyncio
+        from app import _schedule_hitl_resume
+
+        called_with: list[tuple[str, str]] = []
+
+        def mock_resume(slack_ts: str, decision: str) -> None:
+            called_with.append((slack_ts, decision))
+
+        with patch("app._resume_hitl", side_effect=mock_resume):
+            _schedule_hitl_resume("ts_gc_test", "approve")
+            await asyncio.sleep(0.2)
+
+        assert ("ts_gc_test", "approve") in called_with, (
+            "_resume_hitl이 호출되지 않음 — asyncio.create_task() 태스크가 "
+            "참조 없이 GC되었을 가능성이 높습니다."
+        )
+
+
 class TestRouteEmail:
     """route_email() — EmailClassifier 기반 분기 테스트."""
 

@@ -98,6 +98,55 @@ class TestHitlStorePostgres:
             store.insert("1111", "thread-1", "msg_1")
             assert store.lookup_by_slack_ts("1111")["thread_id"] == "thread-1"
 
+    def test_reconnects_on_stale_connection(self):
+        """conn.closed == False지만 서버가 연결을 끊은 경우(stale) 재연결해야 한다.
+
+        Railway idle timeout 시나리오:
+        - psycopg3에서 conn.closed는 클라이언트가 마지막으로 사용한 이후
+          서버가 끊어도 0(False)으로 남는다.
+        - 따라서 _ensure_conn()은 재연결하지 않고, 이후 쿼리가 OperationalError를 던진다.
+        - insert() / lookup_by_slack_ts()는 OperationalError 시 재연결 후 재시도해야 한다.
+        """
+        class _FakeOperationalError(Exception):
+            pass
+
+        with patch("db.hitl_store.psycopg") as mock_psycopg:
+            mock_psycopg.OperationalError = _FakeOperationalError
+
+            # ── 초기 연결 (init 시 _setup_table 성공) ──
+            init_cursor = MagicMock()
+            first_conn = MagicMock()
+            first_conn.closed = False
+            first_conn.cursor.return_value.__enter__ = MagicMock(return_value=init_cursor)
+            first_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+
+            # ── idle timeout 후 재연결 (insert 재시도 성공) ──
+            good_cursor = MagicMock()
+            good_cursor.fetchone.return_value = None  # is_email_pending → False
+            second_conn = MagicMock()
+            second_conn.closed = False
+            second_conn.cursor.return_value.__enter__ = MagicMock(return_value=good_cursor)
+            second_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+
+            mock_psycopg.connect.side_effect = [first_conn, second_conn]
+
+            store = HitlStore(database_url="postgresql://test/db")
+            assert store._use_postgres is True
+
+            # 초기화 이후 idle timeout: 다음 쿼리(insert)에서 OperationalError 발생
+            stale_cursor = MagicMock()
+            stale_cursor.execute.side_effect = _FakeOperationalError("SSL connection closed")
+            first_conn.cursor.return_value.__enter__ = MagicMock(return_value=stale_cursor)
+
+            # insert() → stale connection → 재연결 후 재시도 → True
+            result = store.insert("ts_stale", "thread-stale", "email_stale")
+
+        assert result is True, "stale connection 후 insert가 성공해야 합니다"
+        assert mock_psycopg.connect.call_count == 2, (
+            "stale connection(conn.closed=False, OperationalError) 시 재연결이 없음 — "
+            "_ensure_conn()만으로는 부족합니다. OperationalError 재시도 로직이 필요합니다."
+        )
+
     def test_reconnects_when_connection_closed(self):
         """연결이 끊기면 자동으로 재연결 후 작업이 성공해야 한다.
 

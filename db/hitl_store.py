@@ -50,10 +50,29 @@ class HitlStore:
             logger.info("HitlStore: in-memory mode")
 
     def _ensure_conn(self) -> None:
-        """연결이 끊겼으면 재연결. idle timeout 방어."""
+        """연결이 명시적으로 닫힌 경우 재연결."""
         if self._conn is not None and self._conn.closed and self._url and psycopg:
             logger.info("HitlStore: reconnecting to PostgreSQL")
             self._conn = psycopg.connect(self._url)
+
+    def _reconnect(self) -> None:
+        """서버 측 idle timeout 등으로 연결이 끊긴 경우 강제 재연결."""
+        if self._url and psycopg:
+            logger.info("HitlStore: reconnecting after OperationalError")
+            self._conn = psycopg.connect(self._url)
+
+    def _run(self, fn):
+        """DB 작업 실행. OperationalError 시 재연결 후 1회 재시도.
+
+        conn.closed == False이지만 서버가 idle timeout으로 연결을 끊은 경우
+        (stale connection)를 방어한다.
+        """
+        self._ensure_conn()
+        try:
+            return fn()
+        except psycopg.OperationalError:
+            self._reconnect()
+            return fn()
 
     def _setup_table(self):
         """hitl_pending 테이블 생성 (없으면) + 컬럼 마이그레이션."""
@@ -82,17 +101,18 @@ class HitlStore:
             return False
 
         if self._use_postgres:
-            self._ensure_conn()
-            with self._conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO hitl_pending (slack_ts, thread_id, email_id, subject, sender)
-                    VALUES (%s, %s, %s, %s, %s)
-                    ON CONFLICT (slack_ts) DO NOTHING
-                    """,
-                    (slack_ts, thread_id, email_id, subject, sender),
-                )
-            self._conn.commit()
+            def _do():
+                with self._conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO hitl_pending (slack_ts, thread_id, email_id, subject, sender)
+                        VALUES (%s, %s, %s, %s, %s)
+                        ON CONFLICT (slack_ts) DO NOTHING
+                        """,
+                        (slack_ts, thread_id, email_id, subject, sender),
+                    )
+                self._conn.commit()
+            self._run(_do)
         else:
             self._store[slack_ts] = {
                 "thread_id": thread_id,
@@ -106,13 +126,14 @@ class HitlStore:
     def lookup_by_slack_ts(self, slack_ts: str) -> Optional[dict]:
         """Slack message_ts로 thread_id 조회."""
         if self._use_postgres:
-            self._ensure_conn()
-            with self._conn.cursor() as cur:
-                cur.execute(
-                    "SELECT thread_id, email_id, created_at FROM hitl_pending WHERE slack_ts = %s",
-                    (slack_ts,),
-                )
-                row = cur.fetchone()
+            def _do():
+                with self._conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT thread_id, email_id, created_at FROM hitl_pending WHERE slack_ts = %s",
+                        (slack_ts,),
+                    )
+                    return cur.fetchone()
+            row = self._run(_do)
             if not row:
                 return None
             return {"thread_id": row[0], "email_id": row[1], "created_at": row[2]}
@@ -121,12 +142,13 @@ class HitlStore:
     def remove(self, slack_ts: str) -> bool:
         """처리 완료된 매핑 삭제."""
         if self._use_postgres:
-            self._ensure_conn()
-            with self._conn.cursor() as cur:
-                cur.execute("DELETE FROM hitl_pending WHERE slack_ts = %s", (slack_ts,))
-                deleted = cur.rowcount
-            self._conn.commit()
-            return deleted > 0
+            def _do():
+                with self._conn.cursor() as cur:
+                    cur.execute("DELETE FROM hitl_pending WHERE slack_ts = %s", (slack_ts,))
+                    deleted = cur.rowcount
+                self._conn.commit()
+                return deleted
+            return self._run(_do) > 0
         if slack_ts in self._store:
             del self._store[slack_ts]
             return True
@@ -135,24 +157,26 @@ class HitlStore:
     def is_email_pending(self, email_id: str) -> bool:
         """이미 HITL 대기 중인 이메일인지 확인 (dedup guard)."""
         if self._use_postgres:
-            self._ensure_conn()
-            with self._conn.cursor() as cur:
-                cur.execute(
-                    "SELECT 1 FROM hitl_pending WHERE email_id = %s LIMIT 1",
-                    (email_id,),
-                )
-                return cur.fetchone() is not None
+            def _do():
+                with self._conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT 1 FROM hitl_pending WHERE email_id = %s LIMIT 1",
+                        (email_id,),
+                    )
+                    return cur.fetchone() is not None
+            return self._run(_do)
         return email_id in {v["email_id"] for v in self._store.values()}
 
     def list_pending(self) -> list[dict]:
         """대기 중인 HITL 목록 전체 반환."""
         if self._use_postgres:
-            self._ensure_conn()
-            with self._conn.cursor() as cur:
-                cur.execute(
-                    "SELECT slack_ts, thread_id, email_id, subject, sender, created_at FROM hitl_pending ORDER BY created_at DESC"
-                )
-                rows = cur.fetchall()
+            def _do():
+                with self._conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT slack_ts, thread_id, email_id, subject, sender, created_at FROM hitl_pending ORDER BY created_at DESC"
+                    )
+                    return cur.fetchall()
+            rows = self._run(_do)
             return [
                 {
                     "slack_ts": r[0],
@@ -182,15 +206,16 @@ class HitlStore:
         Returns: 삭제된 건수
         """
         if self._use_postgres:
-            self._ensure_conn()
-            with self._conn.cursor() as cur:
-                cur.execute(
-                    "DELETE FROM hitl_pending WHERE created_at < NOW() - INTERVAL '%s hours'",
-                    (ttl_hours,),
-                )
-                deleted = cur.rowcount
-            self._conn.commit()
-            return deleted
+            def _do():
+                with self._conn.cursor() as cur:
+                    cur.execute(
+                        "DELETE FROM hitl_pending WHERE created_at < NOW() - INTERVAL '%s hours'",
+                        (ttl_hours,),
+                    )
+                    deleted = cur.rowcount
+                self._conn.commit()
+                return deleted
+            return self._run(_do)
 
         now = datetime.now(KST)
         expired = [

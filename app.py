@@ -469,10 +469,14 @@ def _resume_hitl(slack_ts: str, decision: str):
         logger.error(f"HITL resume failed: {e}")
 
 
-def _schedule_hitl_resume(slack_ts: str, decision: str) -> None:
-    """백그라운드에서 HITL resume 실행.
+# asyncio.create_task() 반환 태스크를 강한 참조로 보관.
+# Python 이벤트 루프는 weak reference만 유지하므로 GC 방지를 위해 필요하다.
+_background_tasks: set[asyncio.Task] = set()
 
-    예외가 request lifecycle 밖으로 사라지지 않도록 wrapper에서 시작 로그를 남긴다.
-    """
+
+def _schedule_hitl_resume(slack_ts: str, decision: str) -> None:
+    """백그라운드에서 HITL resume 실행."""
     logger.info(f"HITL resume scheduled: {decision} for slack_ts={slack_ts}")
-    asyncio.create_task(asyncio.to_thread(_resume_hitl, slack_ts, decision))
+    task = asyncio.create_task(asyncio.to_thread(_resume_hitl, slack_ts, decision))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
