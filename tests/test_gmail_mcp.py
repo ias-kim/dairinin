@@ -23,6 +23,8 @@ gmail-mcp의 역할:
 from unittest.mock import MagicMock, patch
 import pytest
 
+import base64
+
 from mcp_servers.gmail_mcp import fetch_emails_logic, mark_read_logic, send_reply_logic, archive_email_logic, add_label_logic
 
 
@@ -282,6 +284,182 @@ class TestArchiveEmail:
         result = archive_email_logic(mock_service, "msg_1")
 
         assert result is False
+
+
+class TestFetchEmailsFullBody:
+    """fetch_emails_logic이 format=full로 이메일 전체 본문을 반환하는지 테스트.
+
+    Gmail metadata format은 ~200자 snippet만 반환 → Re: 스레드에서 과거 날짜를 잘못 추출하는 원인.
+    format=full로 변경하면 전체 본문을 가져와 인용 스레드만 제거할 수 있다.
+    """
+
+    def _make_full_msg(
+        self,
+        email_id: str,
+        body_text: str,
+        subject: str = "Test",
+        from_: str = "test@example.com",
+    ) -> dict:
+        """Gmail API format=full 단순 text/plain 응답 형태 mock 생성."""
+        encoded = base64.urlsafe_b64encode(body_text.encode()).decode().rstrip("=")
+        return {
+            "id": email_id,
+            "snippet": body_text[:200],
+            "payload": {
+                "mimeType": "text/plain",
+                "body": {"size": len(body_text), "data": encoded},
+                "headers": [
+                    {"name": "From", "value": from_},
+                    {"name": "Subject", "value": subject},
+                ],
+            },
+        }
+
+    def test_returns_decoded_body(self):
+        """format=full 응답에서 base64 본문을 디코딩해서 body 필드로 반환.
+
+        'snippet' (~200자) 대신 'body' (전체 본문)를 raw_email로 써야
+        LLM이 이메일 내용을 제대로 파싱할 수 있다.
+        """
+        body_text = "안녕하세요. 5월 8일 오후 2시에 면접을 진행하겠습니다. 확인 부탁드립니다."
+        mock_service = MagicMock()
+        mock_service.users().messages().list().execute.return_value = {
+            "messages": [{"id": "msg_1"}]
+        }
+        mock_service.users().messages().get.return_value.execute.return_value = (
+            self._make_full_msg("msg_1", body_text)
+        )
+
+        result = fetch_emails_logic(mock_service)
+
+        assert len(result) == 1
+        assert result[0]["body"] == body_text
+
+    def test_strips_reply_chain_on_wrote(self):
+        """'On ... wrote:' 이후 인용 스레드 내용을 제거.
+
+        Re: Re: 이메일에서 과거 날짜(2024)가 인용 부분에 있을 때,
+        LLM에게 전달하는 body에서 제거해야 잘못된 날짜 추출을 막을 수 있다.
+        """
+        newest_content = "다음 주 화요일 오전 10시에 뵙겠습니다."
+        old_thread = "On Mon, Apr 27, 2024 at 2:00 PM, Kim <kim@example.com> wrote:\n> 이전 메시지 내용입니다."
+        full_body = f"{newest_content}\n\n{old_thread}"
+        mock_service = MagicMock()
+        mock_service.users().messages().list().execute.return_value = {
+            "messages": [{"id": "msg_1"}]
+        }
+        mock_service.users().messages().get.return_value.execute.return_value = (
+            self._make_full_msg("msg_1", full_body)
+        )
+
+        result = fetch_emails_logic(mock_service)
+
+        assert newest_content in result[0]["body"]
+        assert "On Mon, Apr 27, 2024" not in result[0]["body"]
+        assert "이전 메시지" not in result[0]["body"]
+
+    def test_strips_original_message_separator(self):
+        """'-----Original Message-----' 이후 내용 제거 (Outlook 스타일)."""
+        newest = "내일 미팅 일정입니다."
+        full_body = f"{newest}\n\n-----Original Message-----\nFrom: old@example.com\nSubject: 이전 내용"
+        mock_service = MagicMock()
+        mock_service.users().messages().list().execute.return_value = {
+            "messages": [{"id": "msg_1"}]
+        }
+        mock_service.users().messages().get.return_value.execute.return_value = (
+            self._make_full_msg("msg_1", full_body)
+        )
+
+        result = fetch_emails_logic(mock_service)
+
+        assert newest in result[0]["body"]
+        assert "Original Message" not in result[0]["body"]
+
+    def test_handles_multipart_alternative(self):
+        """multipart/alternative 이메일에서 text/plain 파트를 추출."""
+        plain_text = "일정을 확인해주세요. 5월 15일 오후 3시."
+        html_text = f"<html><body>{plain_text}</body></html>"
+        plain_enc = base64.urlsafe_b64encode(plain_text.encode()).decode().rstrip("=")
+        html_enc = base64.urlsafe_b64encode(html_text.encode()).decode().rstrip("=")
+
+        multipart_msg = {
+            "id": "msg_1",
+            "snippet": plain_text[:200],
+            "payload": {
+                "mimeType": "multipart/alternative",
+                "headers": [
+                    {"name": "From", "value": "test@example.com"},
+                    {"name": "Subject", "value": "일정 확인"},
+                ],
+                "parts": [
+                    {"mimeType": "text/plain", "body": {"data": plain_enc}},
+                    {"mimeType": "text/html", "body": {"data": html_enc}},
+                ],
+            },
+        }
+        mock_service = MagicMock()
+        mock_service.users().messages().list().execute.return_value = {
+            "messages": [{"id": "msg_1"}]
+        }
+        mock_service.users().messages().get.return_value.execute.return_value = multipart_msg
+
+        result = fetch_emails_logic(mock_service)
+
+        assert result[0]["body"] == plain_text
+
+    def test_falls_back_to_snippet_when_no_body_data(self):
+        """payload에 body.data가 없으면 snippet을 body로 사용 (폴백)."""
+        no_body_msg = {
+            "id": "msg_1",
+            "snippet": "이메일 미리보기 내용",
+            "payload": {
+                "mimeType": "text/plain",
+                "body": {"size": 0},  # data 없음
+                "headers": [
+                    {"name": "From", "value": "test@example.com"},
+                    {"name": "Subject", "value": "Test"},
+                ],
+            },
+        }
+        mock_service = MagicMock()
+        mock_service.users().messages().list().execute.return_value = {
+            "messages": [{"id": "msg_1"}]
+        }
+        mock_service.users().messages().get.return_value.execute.return_value = no_body_msg
+
+        result = fetch_emails_logic(mock_service)
+
+        assert result[0]["body"] == "이메일 미리보기 내용"
+
+
+class TestStripQuotedContent:
+    """_strip_quoted_content 순수 함수 단위 테스트."""
+
+    def test_strips_on_wrote_pattern(self):
+        from mcp_servers.gmail_mcp import _strip_quoted_content
+
+        text = "최신 내용입니다.\n\nOn Mon, Jan 1, 2024 at 10:00 AM, someone wrote:\n> 과거 내용"
+        result = _strip_quoted_content(text)
+
+        assert "최신 내용" in result
+        assert "On Mon" not in result
+
+    def test_strips_original_message(self):
+        from mcp_servers.gmail_mcp import _strip_quoted_content
+
+        text = "최신 내용.\n\n-----Original Message-----\n이전 내용"
+        result = _strip_quoted_content(text)
+
+        assert "최신 내용" in result
+        assert "Original Message" not in result
+
+    def test_returns_unchanged_when_no_marker(self):
+        from mcp_servers.gmail_mcp import _strip_quoted_content
+
+        text = "단순 이메일 내용입니다. 5월 10일 오후 3시에 만나요."
+        result = _strip_quoted_content(text)
+
+        assert result == text.strip()
 
 
 class TestAddLabel:

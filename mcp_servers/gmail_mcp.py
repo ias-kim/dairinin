@@ -38,8 +38,10 @@ Gmail MCP 서버.
 
 from __future__ import annotations
 
+import base64
 import logging
 import os
+import re
 from typing import Any
 
 from dotenv import load_dotenv
@@ -90,6 +92,40 @@ def build_gmail_service():
 # ──────────────────────────────────────────────
 
 
+_REPLY_PATTERNS = re.compile(
+    r'\nOn .{10,500}?wrote:'      # Gmail "On <date>, <name> wrote:"
+    r'|\n-{5,}'                   # "-----Original Message-----"
+    r'|\n_{5,}',                  # "___________" separators
+    re.DOTALL,
+)
+
+
+def _extract_text_body(payload: dict) -> str:
+    """Gmail payload에서 text/plain 본문을 재귀적으로 추출하고 base64 디코딩."""
+    mime_type = payload.get("mimeType", "")
+
+    if mime_type == "text/plain":
+        data = payload.get("body", {}).get("data", "")
+        if data:
+            return base64.urlsafe_b64decode(data + "==").decode("utf-8", errors="replace")
+
+    elif mime_type.startswith("multipart/"):
+        for part in payload.get("parts", []):
+            result = _extract_text_body(part)
+            if result:
+                return result
+
+    return ""
+
+
+def _strip_quoted_content(text: str) -> str:
+    """이메일 본문에서 인용된 이전 스레드 내용 제거. 최신 메시지만 반환."""
+    match = _REPLY_PATTERNS.search(text)
+    if match:
+        return text[: match.start()].strip()
+    return text.strip()
+
+
 def fetch_emails_logic(service: Any, max_results: int = 10) -> list[dict]:
     """안 읽은 이메일 목록을 가져온다.
 
@@ -127,7 +163,7 @@ def fetch_emails_logic(service: Any, max_results: int = 10) -> list[dict]:
             msg = (
                 service.users()
                 .messages()
-                .get(userId="me", id=msg_ref["id"], format="metadata")
+                .get(userId="me", id=msg_ref["id"], format="full")
                 .execute()
             )
 
@@ -138,12 +174,17 @@ def fetch_emails_logic(service: Any, max_results: int = 10) -> list[dict]:
                 if h["name"] in ("From", "Subject")
             }
 
+            # 전체 본문 추출 → 인용 스레드 제거 → snippet 폴백
+            raw_body = _extract_text_body(msg.get("payload", {}))
+            body = _strip_quoted_content(raw_body) if raw_body else msg.get("snippet", "")
+
             emails.append(
                 {
                     "id": msg["id"],
                     "from": headers.get("From", ""),
                     "subject": headers.get("Subject", ""),
                     "snippet": msg.get("snippet", ""),
+                    "body": body,
                 }
             )
 

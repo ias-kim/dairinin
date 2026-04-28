@@ -133,7 +133,8 @@ async def route_email(email: dict) -> None:
     other     → skip
     classifier 오류 → pipeline으로 폴백 (안전 기본값)
     """
-    text = f"{email.get('subject', '')} {email.get('snippet', '')}"
+    body_or_snippet = email.get("body") or email.get("snippet", "")
+    text = f"{email.get('subject', '')} {body_or_snippet[:500]}"
     email_id = email["id"]
 
     try:
@@ -213,7 +214,7 @@ def process_single_email(email: dict) -> Optional[dict]:
         result = graph.invoke(
             {
                 "email_id": email["id"],
-                "raw_email": email.get("snippet", ""),
+                "raw_email": email.get("body") or email.get("snippet", ""),
                 "subject": email.get("subject", ""),
                 "sender": email.get("from", ""),
                 "_thread_id": thread_id,
