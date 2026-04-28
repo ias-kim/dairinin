@@ -138,6 +138,38 @@ class TestParserAgent:
             f"시스템 프롬프트에 오늘 날짜({today})가 없습니다"
         )
 
+    def test_prompt_instructs_location_to_include_video_url(self):
+        """location 필드에 Google Meet/Zoom URL을 추출하도록 지시해야 한다.
+
+        Google Calendar에서 location 필드가 비어 있으면
+        참가자가 링크를 찾기 위해 이메일을 다시 열어야 한다.
+        """
+        from agents.parser import PARSER_SYSTEM_PROMPT
+
+        lower = PARSER_SYSTEM_PROMPT.lower()
+        assert "meet" in lower or "video" in lower or "zoom" in lower or "conference" in lower, (
+            "프롬프트에 화상회의 URL(Meet/Zoom/conference) 추출 지시가 없습니다"
+        )
+
+    def test_prompt_instructs_description_to_include_details(self):
+        """description 필드에 면접관, 연락처 등 핵심 정보를 포함하도록 지시해야 한다.
+
+        캘린더 이벤트만 보고도 누구와 무슨 일정인지 알 수 있어야 한다.
+        """
+        from agents.parser import PARSER_SYSTEM_PROMPT
+
+        lower = PARSER_SYSTEM_PROMPT.lower()
+        has_detail_instruction = (
+            "participant" in lower
+            or "contact" in lower
+            or "interviewer" in lower
+            or "agenda" in lower
+            or "details" in lower
+        )
+        assert has_detail_instruction, (
+            "프롬프트에 description에 상세 정보 포함 지시가 없습니다"
+        )
+
     def test_prompt_has_reply_chain_instruction(self):
         """프롬프트에 답장 스레드 처리 지시가 포함되어야 한다.
 

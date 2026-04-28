@@ -33,9 +33,9 @@ Given an email, extract the following if present:
 - title: event name or meeting topic
 - event_datetime: date and time (ISO 8601 format)
 - attendees: list of email addresses or names
-- location: meeting place
+- location: video conference URL (Google Meet, Zoom, Teams link) or physical address. Prefer the video URL if both exist.
 - duration: duration in minutes
-- description: brief description
+- description: key details the attendee needs — participants/interviewers names, agenda, emergency contact, any special instructions. Do NOT include the date/time (already in event_datetime).
 
 If the email does NOT contain a calendar event or meeting request, return null for all fields.
 
