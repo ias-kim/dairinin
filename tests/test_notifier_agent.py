@@ -220,7 +220,7 @@ class TestNotifierAutoRegisterReplyAndSlack:
             patch("agents.notifier.get_memory_store", return_value=MagicMock()),
             patch("agents.notifier.get_hitl_store", return_value=MagicMock()),
             patch("agents.notifier.send_reply_logic"),
-            patch("agents.notifier.send_reply_notification") as mock_slack,
+            patch("agents.notifier.send_auto_register_notification") as mock_slack,
         ):
             notify_node({
                 "email_id": "msg_11",

@@ -20,7 +20,13 @@ from graph.state import ScheduleState
 from mcp_servers.calendar_mcp import build_calendar_service, create_event_logic
 from mcp_servers.gmail_mcp import build_gmail_service, mark_read_logic, send_reply_logic
 from mcp_servers.memory_mcp import MemoryStore
-from mcp_servers.slack_mcp import build_slack_client, send_hitl_message, send_reply_notification
+from mcp_servers.slack_mcp import (
+    build_slack_client,
+    format_datetime_kr,
+    send_auto_register_notification,
+    send_hitl_message,
+    send_reply_notification,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -97,9 +103,9 @@ def _do_send_reply_and_notify(state: ScheduleState):
         logger.warning(f"build_slack_client failed for notification: {e}")
 
     try:
-        send_reply_notification(client, slack_channel, subject or (parsed.title if parsed else ""), sender)
+        send_auto_register_notification(client, slack_channel, parsed, sender)
     except Exception as e:
-        logger.warning(f"send_reply_notification skipped: {e}")
+        logger.warning(f"send_auto_register_notification skipped: {e}")
 
 
 def _do_mark_read(email_id: str):
@@ -187,11 +193,13 @@ def _handle_hitl(state: ScheduleState):
             client = build_slack_client()
 
             conflict_names = [c.get("summary", "Unknown") for c in conflicts]
+            dt = parsed.event_datetime if parsed else None
+            datetime_str = format_datetime_kr(dt) if dt else "미정"
             result = send_hitl_message(
                 client=client,
                 channel=slack_channel,
                 title=parsed.title if parsed else "Unknown",
-                datetime_str=str(parsed.event_datetime) if parsed and parsed.event_datetime else "미정",
+                datetime_str=datetime_str,
                 confidence=confidence,
                 conflicts=conflict_names,
                 email_id=email_id,

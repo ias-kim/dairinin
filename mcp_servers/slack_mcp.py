@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from datetime import datetime
 from typing import Optional
 
 from fastmcp import FastMCP
@@ -17,6 +18,22 @@ from fastmcp import FastMCP
 logger = logging.getLogger(__name__)
 
 mcp = FastMCP("slack")
+
+
+def format_datetime_kr(dt: datetime) -> str:
+    """datetime을 한국어 형식으로 포맷. 예: '2026년 5월 8일 (금) 오후 2:00'"""
+    WEEKDAYS = ["월", "화", "수", "목", "금", "토", "일"]
+    weekday = WEEKDAYS[dt.weekday()]
+    hour = dt.hour
+    minute = dt.minute
+    if hour >= 12:
+        am_pm = "오후"
+        h = hour - 12 if hour > 12 else hour
+    else:
+        am_pm = "오전"
+        h = hour if hour > 0 else 12
+    time_str = f"{am_pm} {h}:{minute:02d}"
+    return f"{dt.year}년 {dt.month}월 {dt.day}일 ({weekday}) {time_str}"
 
 
 def build_slack_client():
@@ -124,6 +141,61 @@ def send_hitl_message(
     except Exception as e:
         logger.error(f"Slack send failed: {e}")
         return None
+
+
+def send_auto_register_notification(
+    client,
+    channel: str,
+    parsed_event,
+    sender: str = "",
+) -> bool:
+    """auto_register 완료 후 Slack으로 등록된 일정 상세 알림.
+
+    Args:
+        client: Slack WebClient
+        channel: 전송할 채널 ID
+        parsed_event: EventJSON (title, event_datetime, location 포함)
+        sender: 이메일 발신자
+
+    Returns:
+        True: 성공, False: 실패
+    """
+    title = parsed_event.title or "제목 없음"
+    dt = parsed_event.event_datetime
+    dt_str = format_datetime_kr(dt) if dt else "일시 미정"
+    location = parsed_event.location or ""
+
+    fields = [
+        {"type": "mrkdwn", "text": f"*제목*\n{title}"},
+        {"type": "mrkdwn", "text": f"*일시*\n{dt_str}"},
+    ]
+    if location:
+        fields.append({"type": "mrkdwn", "text": f"*장소/URL*\n{location}"})
+    if sender:
+        fields.append({"type": "mrkdwn", "text": f"*보낸 사람*\n{sender}"})
+
+    blocks = [
+        {
+            "type": "header",
+            "text": {"type": "plain_text", "text": "✅ 일정 등록 완료", "emoji": True},
+        },
+        {"type": "section", "fields": fields},
+    ]
+
+    fallback = f"✅ 일정 등록 완료: {title} ({dt_str})"
+
+    try:
+        client.chat_postMessage(
+            channel=channel,
+            text=fallback,
+            blocks=blocks,
+            unfurl_links=False,
+        )
+        logger.info(f"Auto-register notification sent: {title}")
+        return True
+    except Exception as e:
+        logger.error(f"send_auto_register_notification failed: {e}")
+        return False
 
 
 def send_reply_notification(client, channel: str, subject: str, sender: str) -> bool:
