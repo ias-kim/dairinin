@@ -179,8 +179,12 @@ class TestNotifierHitl:
 
 class TestNotifierAutoRegisterReplyAndSlack:
 
-    def test_auto_register_sends_reply(self):
-        """auto_register → sender에게 답장 전송."""
+    def test_auto_register_does_not_send_reply(self):
+        """auto_register → Gmail 자동 답장 비활성화 (Slack 확인 후 수동 발송).
+
+        발신자에게 자동으로 답장 메일이 가면 안 된다.
+        일정 등록 확인은 Slack 알림으로만 사용자에게 전달한다.
+        """
         from agents.notifier import notify_node
 
         parsed = EventJSON(title="팀 미팅", event_datetime=datetime(2026, 5, 1, 14, 0), duration=60)
@@ -202,7 +206,7 @@ class TestNotifierAutoRegisterReplyAndSlack:
                 "subject": "팀 미팅 요청",
             })
 
-        mock_reply.assert_called_once()
+        mock_reply.assert_not_called()
 
     def test_auto_register_sends_slack_notification(self):
         """auto_register → Slack 알림 전송."""

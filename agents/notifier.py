@@ -82,20 +82,8 @@ def _do_send_reply_and_notify(state: ScheduleState):
         logger.warning("send_reply skipped: no sender in state")
         return
 
-    # Gmail 답장
-    service = None
-    try:
-        service = build_gmail_service()
-    except Exception as e:
-        logger.warning(f"build_gmail_service failed for reply: {e}")
-
-    try:
-        title = parsed.title if parsed else subject
-        dt_str = str(parsed.event_datetime) if parsed and parsed.event_datetime else ""
-        body = f"안녕하세요,\n\n일정이 등록되었습니다.\n{title}" + (f" ({dt_str})" if dt_str else "") + "\n\n감사합니다."
-        send_reply_logic(service, email_id, body, sender)
-    except Exception as e:
-        logger.warning(f"send_reply skipped: {e}")
+    # Gmail 자동 답장 비활성화 — Slack 확인 후 수동 발송
+    logger.info(f"send_reply skipped (disabled): {sender}")
 
     # Slack 알림
     slack_channel = os.getenv("SLACK_CHANNEL_ID", "")
